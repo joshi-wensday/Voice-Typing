@@ -1,23 +1,71 @@
 # Voice Typing Configuration File
 # Copy to ~/.voice-typing/config.yaml and adjust as needed
+# Edit this file directly or use the Settings UI (right-click overlay)
 
+# ============================================================================
+# Speech-to-Text Engine Configuration
+# ============================================================================
 stt:
-  model: base  # tiny, base, small, medium, large-v2
-  device: cpu  # auto, cuda, cpu
+  # Model size affects accuracy and speed
+  # tiny: fastest, lowest accuracy (39M params)
+  # base: recommended for most users (74M params) 
+  # small: better accuracy, slower (244M params)
+  # medium: high accuracy, requires GPU (769M params)
+  # large-v2/large-v3: best accuracy, requires GPU (1550M params)
+  model: base
+  
+  # Device for inference
+  # auto: automatically select GPU if available, fallback to CPU
+  # cuda: force GPU (requires NVIDIA GPU with CUDA)
+  # cpu: force CPU (slower but works on any hardware)
+  device: auto
+  
+  # Language for transcription (en = English)
+  # For other languages, use ISO 639-1 codes (es, fr, de, etc.)
   language: en
-  compute_type: float32  # int8, float16, float32
+  
+  # Compute precision
+  # float16: fastest on GPU, may not work on CPU
+  # float32: compatible with all devices, slower
+  # int8: smallest memory, fastest, lower accuracy
+  compute_type: float16
 
+# ============================================================================
+# Audio Capture Configuration
+# ============================================================================
 audio:
-  device_id: null  # null = default device
+  # Audio input device ID (null = system default)
+  # Use Settings UI to see available devices
+  device_id: null
+  
+  # Sample rate in Hz (Whisper expects 16000)
   sample_rate: 16000
+  
+  # Number of audio channels (1 = mono, 2 = stereo)
   channels: 1
+  
+  # Audio chunk duration in seconds
   chunk_duration: 0.5
+  
+  # Voice Activity Detection (experimental)
   vad_enabled: false
-  vad_aggressiveness: 2
+  vad_aggressiveness: 2  # 0-3, higher = more aggressive
 
+# ============================================================================
+# Punctuation Handling
+# ============================================================================
 punctuation:
-  mode: hybrid  # auto, manual, hybrid
+  # Punctuation mode:
+  # auto: Use Whisper's built-in punctuation only
+  # manual: Voice commands only (disable Whisper's punctuation)
+  # hybrid: Both (manual voice commands override auto punctuation)
+  mode: hybrid
+  
+  # Automatically capitalize first letter of sentences
   auto_capitalize: true
+  
+  # Manual punctuation voice commands
+  # You can enable/disable individual commands or customize patterns
   manual_commands:
     period:
       enabled: true
@@ -40,33 +88,138 @@ punctuation:
       action: "!"
       description: Insert exclamation mark
 
+# ============================================================================
+# Voice Commands
+# ============================================================================
 commands:
+  # Enable/disable all voice commands
   enabled: true
+  
+  # Built-in control commands
   new_line:
     enabled: true
     pattern: "\\b(new line|newline)\\b"
-    action: "\n"
+    action: "\\n"
     description: Insert line break
+  
   stop_dictation:
     enabled: true
     pattern: "\\b(stop dictation|stop listening)\\b"
     action: "STOP"
     description: End recording session
+  
+  # Custom commands - add your own here!
+  # Example: "insert email" -> your@email.com
   custom_commands: {}
+    # my_email:
+    #   enabled: true
+    #   pattern: "\\b(insert email|my email)\\b"
+    #   action: "your@email.com"
+    #   description: Insert email address
+    # my_signature:
+    #   enabled: true
+    #   pattern: "\\b(insert signature)\\b"
+    #   action: "Best regards,\\nYour Name"
+    #   description: Insert email signature
 
+# ============================================================================
+# User Interface Configuration
+# ============================================================================
 ui:
+  # Show circular audio visualizer overlay
   show_visualizer: true
+  
+  # Visualizer size in pixels
   visualizer_size: 100
+  
+  # Visualizer opacity (0.0 = transparent, 1.0 = opaque)
   visualizer_opacity: 0.8
+  
+  # Initial visualizer position [x, y] from top-left
+  # Position is saved when you drag the visualizer
   visualizer_position: [100, 100]
+  
+  # Start application minimized to tray
   start_minimized: true
+  
+  # Close to tray instead of exiting
   close_to_tray: true
-  hotkey: ctrl+alt+space
+  
+  # Global hotkey (toggle dictation on/off)
+  # Format: ctrl+shift+key, ctrl+alt+key, etc.
+  # If this fails, app will try fallback hotkeys
+  hotkey: ctrl+shift+space
 
+# ============================================================================
+# Text Output Configuration
+# ============================================================================
 output:
-  primary_method: keyboard  # keyboard, uia, win32, clipboard
+  # Primary method for inserting text
+  # keyboard: Simulate keyboard typing (fast, works in most apps)
+  # uia: UI Automation (slower, better compatibility with modern apps)
+  # win32: Win32 API (fast, legacy apps)
+  # clipboard: Clipboard paste (fastest, overwrites clipboard)
+  primary_method: keyboard
+  
+  # Fallback methods if primary fails (tried in order)
   fallback_methods: [clipboard]
+  
+  # Typing speed in seconds per character (for keyboard method)
+  # Lower = faster, but may cause issues in some apps
   typing_speed: 0.01
+  
+  # Prefer clipboard for text longer than this many characters
+  # Reduces latency for long transcriptions
+  prefer_clipboard_over_chars: 200
 
+# ============================================================================
+# Streaming and Segmentation
+# ============================================================================
+streaming:
+  # Streaming mode (future: semi_streaming for partial results)
+  mode: final_only
+  
+  # Segmentation method
+  # energy: Silence detection based on audio energy
+  # vad: Voice Activity Detection (future)
+  segmentation: energy
+  
+  # Minimum segment length in seconds
+  # Shorter = more responsive, but more frequent processing
+  min_segment_sec: 1.2
+  
+  # Minimum silence duration to trigger segment finalization
+  # Shorter = more responsive, may cut off mid-sentence
+  min_silence_sec: 0.6
+  
+  # Energy threshold for silence detection (0.0 - 1.0)
+  # Lower = more sensitive to silence
+  # Adjust if transcription segments too early or too late
+  energy_threshold: 0.015
+
+# ============================================================================
+# Whisper Decoding Parameters
+# ============================================================================
+decoding:
+  # Beam size for beam search (higher = more accurate, slower)
+  # 1 = greedy search (fastest)
+  # 5 = default (good balance)
+  # 10+ = maximum quality (slower)
+  beam_size: 5
+  
+  # Temperature for sampling (0.0 = deterministic)
+  # Higher values increase randomness
+  temperature: 0.0
+  
+  # Use previous transcription as context (improves coherence)
+  condition_on_previous_text: true
+
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+# Logging level: DEBUG, INFO, WARNING, ERROR
 log_level: INFO
+
+# Log file path (null = no file logging, only console)
+# Example: C:\Users\YourName\.voice-typing\voice-typing.log
 log_file: null

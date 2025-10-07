@@ -146,6 +146,25 @@ class OutputConfig(BaseModel):
     primary_method: str = "keyboard"  # keyboard, uia, win32, clipboard
     fallback_methods: list[str] = ["clipboard"]
     typing_speed: float = 0.01  # delay between characters (seconds)
+    prefer_clipboard_over_chars: int = 200
+
+
+class StreamingConfig(BaseModel):
+    """Streaming/segmentation configuration."""
+
+    mode: str = "final_only"  # final_only | semi_streaming (future)
+    segmentation: str = "energy"  # energy | vad (future)
+    min_segment_sec: float = 1.2
+    min_silence_sec: float = 0.6
+    energy_threshold: float = 0.015
+
+
+class DecodingConfig(BaseModel):
+    """Decoding parameters for Whisper."""
+
+    beam_size: int = 5
+    temperature: float = 0.0
+    condition_on_previous_text: bool = True
 
 
 class AppConfig(BaseModel):
@@ -157,6 +176,8 @@ class AppConfig(BaseModel):
     commands: CommandsConfig = Field(default_factory=CommandsConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    streaming: StreamingConfig = Field(default_factory=StreamingConfig)
+    decoding: DecodingConfig = Field(default_factory=DecodingConfig)
 
     # Logging
     log_level: str = "INFO"

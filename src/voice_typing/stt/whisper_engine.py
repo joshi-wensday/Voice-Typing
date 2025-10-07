@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Optional
 
 import numpy as np
 from faster_whisper import WhisperModel
+
+from ..config.manager import ConfigManager
 
 
 @dataclass
@@ -25,19 +27,12 @@ class FasterWhisperEngine:
         compute_type: str = "float16",
         language: str | None = "en",
     ) -> None:
-        """Initialize the engine.
-
-        Args:
-            model: Whisper model size/name
-            device: Device selection (auto, cuda, cpu)
-            compute_type: Inference precision (float16, int8, float32)
-            language: ISO language code or None for auto-detect
-        """
         self.model_name = model
         self.device = device
         self.compute_type = compute_type
         self.language = str(language) if language is not None else None
         self._model: WhisperModel | None = None
+        self._cfgm = ConfigManager()
 
     def _init_model(self, compute_type: str | None = None) -> None:
         ct = compute_type or self.compute_type
@@ -45,31 +40,33 @@ class FasterWhisperEngine:
         self.compute_type = ct
 
     def preload(self) -> None:
-        """Load the Whisper model into memory, with float32 fallback if needed."""
         if self._model is not None:
             return
         try:
             self._init_model()
         except ValueError as e:
-            # Fallback if float16 unsupported
             if "float16" in str(e):
                 self._init_model("float32")
             else:
                 raise
 
     def load_model(self, model_name: str) -> None:
-        """Swap the model at runtime."""
         self.model_name = model_name
-        # Force reload
         self._model = None
         self.preload()
 
     def get_supported_models(self) -> list[str]:
-        """Return common model names."""
         return ["tiny", "base", "small", "medium", "large-v2"]
 
+    def _decode_params(self) -> dict:
+        d = self._cfgm.config.decoding
+        return {
+            "beam_size": d.beam_size,
+            "temperature": d.temperature,
+            # faster-whisper uses initial_prompt; condition_on_previous_text is implicitly handled by context
+        }
+
     def transcribe(self, audio_data: np.ndarray, sample_rate: int = 16000) -> TranscriptionResult:
-        """Transcribe mono float32 audio to text (batch)."""
         if audio_data.ndim != 1:
             raise ValueError("audio_data must be 1-D mono float32 array")
         if self._model is None:
@@ -78,19 +75,30 @@ class FasterWhisperEngine:
         segments, info = self._model.transcribe(
             audio=audio_data,
             language=self.language,
-            vad_filter=False,
-            beam_size=1,
+            vad_filter=True,
+            **self._decode_params(),
         )
         text_parts = [seg.text for seg in segments]  # type: ignore[attr-defined]
         text = " ".join([t.strip() for t in text_parts]).strip()
         return TranscriptionResult(text=text, language=getattr(info, "language", None))
 
-    def transcribe_incremental(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
-        """Transcribe short chunks to support streaming.
-
-        Note: This is a naive approach that runs decode per chunk. For
-a higher-performance streaming solution, integrate VAD and segment caching.
-        """
+    def transcribe_incremental(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int = 16000,
+        initial_prompt: str | None = None,
+    ) -> str:
         if audio_data.size == 0:
             return ""
-        return self.transcribe(audio_data, sample_rate=sample_rate).text
+        if self._model is None:
+            self.preload()
+        assert self._model is not None
+        segments, _ = self._model.transcribe(
+            audio=audio_data,
+            language=self.language,
+            vad_filter=True,
+            initial_prompt=initial_prompt,
+            **self._decode_params(),
+        )
+        text_parts = [seg.text for seg in segments]  # type: ignore[attr-defined]
+        return " ".join([t.strip() for t in text_parts]).strip()

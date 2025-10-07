@@ -16,6 +16,7 @@ class OutputHandler:
         self.config = config
         speed = config.output.typing_speed
         self._strategies = self._build_strategies(speed)
+        self._clipboard = ClipboardStrategy()
 
     def _build_strategies(self, typing_speed: float) -> list:
         order = []
@@ -33,6 +34,10 @@ class OutputHandler:
         return order
 
     def inject_text(self, text: str) -> bool:
+        # Prefer clipboard for long text to reduce latency
+        if len(text) >= self.config.output.prefer_clipboard_over_chars and self._clipboard.is_available():
+            if self._clipboard.inject_text(text):
+                return True
         for strat in self._strategies:
             if getattr(strat, "is_available")() and strat.inject_text(text):
                 return True
@@ -51,5 +56,4 @@ class OutputHandler:
             return self.inject_text("\n")
         if isinstance(command, PunctuationCommand):
             return self.inject_text(command.symbol)
-        # Unknown commands are considered handled for now
         return True
