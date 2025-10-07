@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-typing"
+version = "0.1.0"
+description = "Local speech-to-text dictation for Windows"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Josh", email = "josh@example.com"}
+]
+maintainers = [
+    {name = "Josh", email = "josh@example.com"}
+]
+keywords = ["speech-to-text", "whisper", "dictation", "accessibility", "voice-control"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=0.10.0",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24.0",
+    "keyboard>=0.13.5",
+    "pywinauto>=0.6.8",
+    "pyperclip>=1.8.2",
+    "pystray>=0.19.5",
+    "Pillow>=10.0.0",
+    "pydantic>=2.0.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.1",
+    "black>=23.7.0",
+    "flake8>=6.1.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.3.3",
+    "types-PyYAML>=6.0.0",
+]
+noise-reduction = [
+    "noisereduce>=3.0.0",
+    "webrtcvad>=2.0.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/voice-typing"
+Documentation = "https://github.com/yourusername/voice-typing/tree/main/docs"
+Repository = "https://github.com/yourusername/voice-typing"
+Issues = "https://github.com/yourusername/voice-typing/issues"
+Changelog = "https://github.com/yourusername/voice-typing/blob/main/CHANGELOG.md"
+
+[project.scripts]
+voice-typing = "voice_typing.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+include = '\\.pyi?$'
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--strict-markers --cov=voice_typing --cov-report=term-missing"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.coverage.run]
+source = ["src/voice_typing"]
+omit = ["tests/*", "scripts/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

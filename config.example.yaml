@@ -1,0 +1,72 @@
+# Voice Typing Configuration File
+# Copy to ~/.voice-typing/config.yaml and adjust as needed
+
+stt:
+  model: base  # tiny, base, small, medium, large-v2
+  device: cpu  # auto, cuda, cpu
+  language: en
+  compute_type: float32  # int8, float16, float32
+
+audio:
+  device_id: null  # null = default device
+  sample_rate: 16000
+  channels: 1
+  chunk_duration: 0.5
+  vad_enabled: false
+  vad_aggressiveness: 2
+
+punctuation:
+  mode: hybrid  # auto, manual, hybrid
+  auto_capitalize: true
+  manual_commands:
+    period:
+      enabled: true
+      pattern: "\\b(period|full stop)\\b"
+      action: "."
+      description: Insert period
+    comma:
+      enabled: true
+      pattern: "\\b(comma)\\b"
+      action: ","
+      description: Insert comma
+    question_mark:
+      enabled: true
+      pattern: "\\b(question mark)\\b"
+      action: "?"
+      description: Insert question mark
+    exclamation_mark:
+      enabled: true
+      pattern: "\\b(exclamation mark|exclamation point)\\b"
+      action: "!"
+      description: Insert exclamation mark
+
+commands:
+  enabled: true
+  new_line:
+    enabled: true
+    pattern: "\\b(new line|newline)\\b"
+    action: "\n"
+    description: Insert line break
+  stop_dictation:
+    enabled: true
+    pattern: "\\b(stop dictation|stop listening)\\b"
+    action: "STOP"
+    description: End recording session
+  custom_commands: {}
+
+ui:
+  show_visualizer: true
+  visualizer_size: 100
+  visualizer_opacity: 0.8
+  visualizer_position: [100, 100]
+  start_minimized: true
+  close_to_tray: true
+  hotkey: ctrl+alt+space
+
+output:
+  primary_method: keyboard  # keyboard, uia, win32, clipboard
+  fallback_methods: [clipboard]
+  typing_speed: 0.01
+
+log_level: INFO
+log_file: null
