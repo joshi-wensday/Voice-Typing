@@ -29,7 +29,7 @@ $Shortcut.IconLocation = "shell32.dll,222"  # Microphone icon
 $Shortcut.Save()
 
 Write-Host ""
-Write-Host "✓ Desktop shortcut created successfully!" -ForegroundColor Green
+Write-Host "Desktop shortcut created successfully!" -ForegroundColor Green
 Write-Host "  Location: $shortcutPath" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "You can now double-click 'Voice Typing' on your desktop to launch the app!" -ForegroundColor Yellow
