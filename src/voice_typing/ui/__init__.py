@@ -1,1 +1,1 @@
-"""User interface components (tray, overlay, settings)."""
+"""User interface components (tray, overlay, settings) with modern visual effects."""

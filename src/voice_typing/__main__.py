@@ -119,7 +119,13 @@ def _run_app() -> None:
     # Tray (runs in its own thread); Exit will quit Tk
     tray = TrayApp(on_toggle=controller.toggle, on_exit=root.quit, on_settings=settings.show)
     tray.run()
-    controller.on_status_change = tray.set_status
+    
+    # Connect status changes to both tray and overlay
+    def on_status_change(status: str) -> None:
+        tray.set_status(status)
+        overlay.set_state(status)
+    
+    controller.on_status_change = on_status_change
 
     # Hotkey candidates: config first, then fallbacks (runs in bg threads)
     preferred = cfgm.config.ui.hotkey or "ctrl+alt+space"

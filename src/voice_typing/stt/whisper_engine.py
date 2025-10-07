@@ -9,6 +9,7 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 from ..config.manager import ConfigManager
+from .text_processor import TextProcessor
 
 
 @dataclass
@@ -33,6 +34,12 @@ class FasterWhisperEngine:
         self.language = str(language) if language is not None else None
         self._model: WhisperModel | None = None
         self._cfgm = ConfigManager()
+        
+        # Initialize text processor with config settings
+        self._text_processor = TextProcessor(
+            remove_fillers=self._cfgm.config.stt.remove_filler_words,
+            improve_grammar=self._cfgm.config.stt.improve_grammar
+        )
 
     def _init_model(self, compute_type: str | None = None) -> None:
         ct = compute_type or self.compute_type
@@ -80,6 +87,10 @@ class FasterWhisperEngine:
         )
         text_parts = [seg.text for seg in segments]  # type: ignore[attr-defined]
         text = " ".join([t.strip() for t in text_parts]).strip()
+        
+        # Apply text processing (filler removal, grammar improvement)
+        text = self._text_processor.process(text)
+        
         return TranscriptionResult(text=text, language=getattr(info, "language", None))
 
     def transcribe_incremental(
@@ -101,4 +112,9 @@ class FasterWhisperEngine:
             **self._decode_params(),
         )
         text_parts = [seg.text for seg in segments]  # type: ignore[attr-defined]
-        return " ".join([t.strip() for t in text_parts]).strip()
+        text = " ".join([t.strip() for t in text_parts]).strip()
+        
+        # Apply text processing (filler removal, grammar improvement)
+        text = self._text_processor.process(text)
+        
+        return text

@@ -51,6 +51,8 @@ class STTConfig(BaseModel):
     device: Device = Device.AUTO
     language: str = "en"
     compute_type: str = "float16"  # int8, float16, float32
+    remove_filler_words: bool = False  # Remove um, uh, etc.
+    improve_grammar: bool = False  # Context-aware grammar improvement
 
 
 class AudioConfig(BaseModel):
@@ -128,8 +130,8 @@ class UIConfig(BaseModel):
 
     # Visualizer overlay
     show_visualizer: bool = True
-    visualizer_size: int = 100  # pixels
-    visualizer_opacity: float = Field(0.8, ge=0.0, le=1.0)
+    visualizer_size: int = 80  # pixels (reduced for cleaner look)
+    visualizer_opacity: float = Field(0.9, ge=0.0, le=1.0)  # Increased for better visibility
     visualizer_position: tuple[int, int] = (100, 100)  # x, y from top-left
 
     # System tray

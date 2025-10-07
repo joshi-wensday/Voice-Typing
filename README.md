@@ -11,7 +11,9 @@
 - 🎯 **Global Hotkey Activation** - Press `Ctrl+Shift+Space` in any application
 - 🔒 **100% Local Processing** - Your audio never leaves your machine
 - ⚡ **Fast Transcription** - <3 second latency using OpenAI Whisper
-- 🎨 **Real-time Visualization** - Circular audio waveform overlay
+- 🎨 **Stunning Modern UI** - Beautiful circular visualizer with dynamic gradients and smooth animations
+- 💎 **Glassmorphism Design** - Modern, professional settings window with custom widgets
+- 🌊 **Real-time Waveform** - 48-bar circular frequency visualization at 30 FPS
 - 🗣️ **Voice Commands** - "new line", "period", "stop dictation"
 - 🔧 **Fully Customizable** - Add your own commands and shortcuts
 - 🎛️ **Flexible Punctuation** - Auto-punctuation with manual override options
@@ -88,6 +90,35 @@ python -m voice_typing
 - **Left-click visualizer** - Mute/unmute
 - **Right-click visualizer** - Open settings
 - **Drag visualizer** - Move to preferred screen position
+
+## 🎨 Modern UI Features
+
+Voice Typing features a completely redesigned, professional-grade interface:
+
+### Circular Audio Visualizer
+- **Dynamic Gradients**: Colors change based on state (idle/recording/processing)
+  - **Idle**: Calm blue/purple with gentle breathing animation
+  - **Recording**: Energetic red/orange with active pulsing
+  - **Processing**: Yellow/gold with smooth rotation
+- **Waveform Visualization**: 48 circular frequency bars that react to your voice
+- **Smooth Animations**: 30 FPS performance with optimized rendering
+- **Interactive Effects**: Hover highlights, click ripples, drag trails
+
+### Glassmorphism Settings Window
+- **Modern Dark Theme**: Semi-transparent background with beautiful gradients
+- **Custom Widgets**: Rounded buttons with hover effects, styled input fields
+- **Smooth Animations**: Fade-in transitions, success confirmations
+- **Professional Layout**: Tabbed interface with spacious, organized design
+
+See [UI Modernization Documentation](docs/ui_modernization.md) for complete details.
+
+### Testing the UI
+
+Run the visual test suite to explore all UI features:
+
+```bash
+python test_ui_modernization.py
+```
 
 ## ⚙️ Configuration
 
