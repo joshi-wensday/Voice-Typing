@@ -76,3 +76,14 @@ models/
 # User data
 user_data/
 recordings/
+
+# Build artifacts (PyInstaller)
+build/
+dist/
+installer_output/
+
+# Crash dumps
+*.stackdump
+
+# OS-specific
+Thumbs.db
