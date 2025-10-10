@@ -15,21 +15,21 @@ def main():
     # Check if PyInstaller is installed
     try:
         import PyInstaller
-        print(f"✓ PyInstaller {PyInstaller.__version__} found")
+        print(f"[OK] PyInstaller {PyInstaller.__version__} found")
     except ImportError:
-        print("✗ PyInstaller not found. Installing...")
+        print("[INFO] PyInstaller not found. Installing...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
-        print("✓ PyInstaller installed")
+        print("[OK] PyInstaller installed")
     
     # Get project root
     project_root = Path(__file__).parent.parent
     spec_file = project_root / "vype.spec"
     
     if not spec_file.exists():
-        print(f"✗ Error: {spec_file} not found!")
+        print(f"[ERROR] Spec file not found: {spec_file}")
         return 1
     
-    print(f"✓ Spec file found: {spec_file}")
+    print(f"[OK] Spec file found: {spec_file}")
     print()
     
     # Clean previous builds
@@ -59,7 +59,7 @@ def main():
             "--noconfirm",
         ])
     except subprocess.CalledProcessError as e:
-        print(f"\n✗ Build failed with error code {e.returncode}")
+        print(f"\n[ERROR] Build failed with error code {e.returncode}")
         return 1
     
     print("-" * 70)
@@ -70,7 +70,7 @@ def main():
     
     if exe_path.exists():
         size_mb = exe_path.stat().st_size / (1024 * 1024)
-        print("✓ Build successful!")
+        print("[SUCCESS] Build successful!")
         print()
         print(f"Executable: {exe_path}")
         print(f"Size: {size_mb:.1f} MB")
@@ -86,7 +86,7 @@ def main():
         print()
         return 0
     else:
-        print("✗ Build completed but executable not found!")
+        print("[ERROR] Build completed but executable not found!")
         return 1
 
 if __name__ == "__main__":
