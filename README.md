@@ -39,19 +39,54 @@
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### 📥 Download
 
-- Windows 10/11
-- Python 3.10 or higher
+**For End Users (Recommended):**
+
+Download the Windows installer from the [Releases page](https://github.com/joshi-wensday/Voice-Typing/releases/latest):
+
+- **[Download Vype Setup v1.0.0](https://github.com/joshi-wensday/Voice-Typing/releases/download/v1.0.0/vype-setup-v1.0.0.exe)** (77 MB)
+
+The installer includes:
+- ✅ Complete application with all dependencies
+- ✅ Desktop shortcut creation
+- ✅ Start Menu integration
+- ✅ Automatic updates (future)
+- ✅ Uninstaller
+
+**For Developers:**
+
+See the [Development Setup](#for-developers) section below.
+
+### System Requirements
+
+- Windows 10/11 (64-bit)
+- 4GB+ RAM
+- 2GB+ free disk space (for models)
 - NVIDIA GPU with CUDA support (recommended, CPU also works)
-- 4GB+ free disk space (for models)
 
-### Installation
+### Installation (End Users)
+
+1. Download the installer from the link above
+2. Run `vype-setup-v1.0.0.exe`
+3. Follow the installation wizard
+4. Launch Vype from the desktop shortcut or Start Menu
+5. First launch will prompt you to download a speech model
+
+**Note:** Windows may show a SmartScreen warning for unsigned applications. Click "More info" → "Run anyway" to proceed.
+
+### For Developers
+
+**Prerequisites:**
+- Python 3.10 or higher
+- Git
+
+**Quick Setup:**
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/vype.git
-cd vype
+git clone https://github.com/joshi-wensday/Voice-Typing.git
+cd Voice-Typing
 
 # Run the automated setup script
 python scripts/setup_dev.py
@@ -63,7 +98,7 @@ The setup script will:
 - Download the default Whisper model
 - Set up pre-commit hooks
 
-### Manual Installation
+**Manual Setup:**
 
 ```bash
 # Create virtual environment
@@ -77,7 +112,7 @@ pip install -e .
 python scripts/download_models.py --model base
 ```
 
-### Running the Application
+**Running from Source:**
 
 ```bash
 # Activate virtual environment (if not already active)
@@ -227,8 +262,8 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 Quick Links:
 - [Development Setup](docs/development.md)
-- [Bug Reports](https://github.com/yourusername/vype/issues/new?template=bug_report.md)
-- [Feature Requests](https://github.com/yourusername/vype/issues/new?template=feature_request.md)
+- [Bug Reports](https://github.com/joshi-wensday/Voice-Typing/issues/new?template=bug_report.md)
+- [Feature Requests](https://github.com/joshi-wensday/Voice-Typing/issues/new?template=feature_request.md)
 
 ## 📋 Roadmap
 
@@ -240,7 +275,7 @@ Quick Links:
 - [ ] macOS/Linux support
 - [ ] Plugin system for custom STT engines
 
-See [Issues](https://github.com/yourusername/vype/issues) for full roadmap.
+See [Issues](https://github.com/joshi-wensday/Voice-Typing/issues) for full roadmap.
 
 ## 📜 License
 
@@ -255,8 +290,8 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) for deta
 ## 💬 Support
 
 - 📖 [Documentation](docs/)
-- 🐛 [Issue Tracker](https://github.com/yourusername/vype/issues)
-- 💬 [Discussions](https://github.com/yourusername/vype/discussions)
+- 🐛 [Issue Tracker](https://github.com/joshi-wensday/Voice-Typing/issues)
+- 💬 [Discussions](https://github.com/joshi-wensday/Voice-Typing/discussions)
 
 ---
 
