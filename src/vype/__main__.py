@@ -11,17 +11,17 @@ import tkinter as tk
 
 import numpy as np
 
-from .audio.capture import AudioCapture
-from .config.manager import ConfigManager
-from .stt.whisper_engine import FasterWhisperEngine
-from .controller import VoiceTypingController
-from .ui.hotkey import HotkeyManager
-from .ui.hotkey_win32 import Win32Hotkey
-from .ui.tray import TrayApp
-from .ui.settings_window import SettingsWindow
-from .ui.overlay import Overlay
-from .utils.system import SingleInstance
-from .utils.logger import setup_logging, get_logger
+from vype.audio.capture import AudioCapture
+from vype.config.manager import ConfigManager
+from vype.stt.whisper_engine import FasterWhisperEngine
+from vype.controller import VoiceTypingController
+from vype.ui.hotkey import HotkeyManager
+from vype.ui.hotkey_win32 import Win32Hotkey
+from vype.ui.tray import TrayApp
+from vype.ui.settings_window import SettingsWindow
+from vype.ui.overlay import Overlay
+from vype.utils.system import SingleInstance
+from vype.utils.logger import setup_logging, get_logger
 
 
 def _parse_args() -> argparse.Namespace:
