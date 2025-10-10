@@ -3,9 +3,9 @@ requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "voice-typing"
-version = "0.1.0"
-description = "Local speech-to-text dictation for Windows"
+name = "vype"
+version = "1.0.0"
+description = "Vype - Voice dictation that runs entirely locally on your PC"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -57,14 +57,14 @@ noise-reduction = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/voice-typing"
-Documentation = "https://github.com/yourusername/voice-typing/tree/main/docs"
-Repository = "https://github.com/yourusername/voice-typing"
-Issues = "https://github.com/yourusername/voice-typing/issues"
-Changelog = "https://github.com/yourusername/voice-typing/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/yourusername/vype"
+Documentation = "https://github.com/yourusername/vype/tree/main/docs"
+Repository = "https://github.com/yourusername/vype"
+Issues = "https://github.com/yourusername/vype/issues"
+Changelog = "https://github.com/yourusername/vype/blob/main/CHANGELOG.md"
 
 [project.scripts]
-voice-typing = "voice_typing.__main__:main"
+vype = "vype.__main__:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -82,7 +82,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--strict-markers --cov=voice_typing --cov-report=term-missing"
+addopts = "--strict-markers --cov=vype --cov-report=term-missing"
 
 [tool.mypy]
 python_version = "3.10"
@@ -91,7 +91,7 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 
 [tool.coverage.run]
-source = ["src/voice_typing"]
+source = ["src/vype"]
 omit = ["tests/*", "scripts/*"]
 
 [tool.coverage.report]

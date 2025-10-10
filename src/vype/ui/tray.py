@@ -20,7 +20,7 @@ class TrayApp:
         self.on_settings = on_settings
         self._icon: Optional[pystray.Icon] = None
         self._status = "idle"  # idle|recording|processing
-        self._tooltip = "Voice Typing"
+        self._tooltip = "Vype"
 
     def is_available(self) -> bool:
         return pystray is not None and Image is not None

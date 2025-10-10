@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from voice_typing.config.manager import ConfigManager
+from vype.config.manager import ConfigManager
 
 
 def test_load_creates_default_tmp(tmp_path: Path) -> None:

@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from voice_typing.stt.whisper_engine import FasterWhisperEngine
+from vype.stt.whisper_engine import FasterWhisperEngine
 
 
-@patch("voice_typing.stt.whisper_engine.WhisperModel")
+@patch("vype.stt.whisper_engine.WhisperModel")
 def test_preload_initializes_model(mock_model: MagicMock) -> None:
     engine = FasterWhisperEngine(model="base", device="cpu")
     assert engine._model is None
@@ -17,7 +17,7 @@ def test_preload_initializes_model(mock_model: MagicMock) -> None:
     mock_model.assert_called_once()
 
 
-@patch("voice_typing.stt.whisper_engine.WhisperModel")
+@patch("vype.stt.whisper_engine.WhisperModel")
 def test_transcribe_concatenates_segments(mock_model: MagicMock) -> None:
     # Mock segments iterator
     seg1 = SimpleNamespace(text="Hello")

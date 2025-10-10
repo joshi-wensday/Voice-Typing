@@ -1,4 +1,4 @@
-# 🎤 Voice Typing - Local Speech-to-Text for Windows
+# 🎤 Vype - Local Speech-to-Text for Windows
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
@@ -6,18 +6,36 @@
 
 **System-wide voice dictation that runs entirely locally. No cloud, no subscriptions, just your voice and your PC.**
 
+> **Vype** = Voice + Type. Your personal voice dictation assistant.
+
 ## ✨ Features
 
-- 🎯 **Global Hotkey Activation** - Press `Ctrl+Shift+Space` in any application
+### Core Functionality
+- 🎯 **Global Hotkey Activation** - Customizable hotkey (default: `Ctrl+Shift+Space`)
 - 🔒 **100% Local Processing** - Your audio never leaves your machine
 - ⚡ **Fast Transcription** - <3 second latency using OpenAI Whisper
-- 🎨 **Stunning Modern UI** - Beautiful circular visualizer with dynamic gradients and smooth animations
-- 💎 **Glassmorphism Design** - Modern, professional settings window with custom widgets
-- 🌊 **Real-time Waveform** - 48-bar circular frequency visualization at 30 FPS
 - 🗣️ **Voice Commands** - "new line", "period", "stop dictation"
-- 🔧 **Fully Customizable** - Add your own commands and shortcuts
 - 🎛️ **Flexible Punctuation** - Auto-punctuation with manual override options
+
+### Modern UI & Customization
+- 🎨 **Circular Audio Spectrum Visualizer** - Real-time FFT analysis with 48 frequency bands
+- 💎 **Glassmorphism Design** - Modern, professional settings window
+- 🌈 **Full Theme Customization** - Choose your own colors for idle/recording/processing states
+- 🔍 **Transparency Controls** - Adjust opacity for overlay and settings window
+- 📏 **Resizable Visualizer** - Scale from 60px to 150px
+- ⌨️ **Interactive Hotkey Capture** - Set custom hotkeys like in a video game
+
+### Model Management
+- 📦 **Easy Model Installation** - Download models directly from the app
+- 🧪 **Model Testing & Benchmarking** - Compare performance on your hardware
+- 📊 **Performance Metrics** - See speed and accuracy for each model
+- 🔄 **HuggingFace Integration** - Install custom models from URLs
+- 💾 **10 Curated Models** - From tiny (39M) to large-v3 (1550M parameters)
+
+### Advanced Features
+- 🔧 **Fully Customizable** - Add your own commands and shortcuts
 - 📦 **Modular Architecture** - Swap STT engines without breaking anything
+- 🎨 **Custom Styled Widgets** - Modern dropdowns, sliders, and color pickers
 
 ## 🚀 Quick Start
 
@@ -32,8 +50,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/voice-typing.git
-cd voice-typing
+git clone https://github.com/yourusername/vype.git
+cd vype
 
 # Run the automated setup script
 python scripts/setup_dev.py
@@ -65,8 +83,8 @@ python scripts/download_models.py --model base
 # Activate virtual environment (if not already active)
 venv\Scripts\activate
 
-# Run Voice Typing
-python -m voice_typing
+# Run Vype
+python -m vype
 ```
 
 **Note:** On Windows, the application requires administrator privileges to register global hotkeys.
@@ -112,6 +130,40 @@ Voice Typing features a completely redesigned, professional-grade interface:
 
 See [UI Modernization Documentation](docs/ui_modernization.md) for complete details.
 
+### Model Management
+
+Vype includes a comprehensive model management system:
+
+**Installing Models:**
+1. Open Settings → Models tab
+2. Select a model from the dropdown (tiny, base, small, medium, large-v2, large-v3)
+3. Click "Download Model" - Vype handles everything automatically
+4. Or paste a HuggingFace URL for custom models
+
+**Testing Models:**
+- Click "Test All Models" to benchmark installed models
+- See real-time comparison of speed vs. accuracy
+- Get automatic recommendations for your hardware
+
+**Manual Installation:**
+- Click "Open Model Folder" to access the model directory
+- Drop model files directly into the folder
+- Click "Refresh" to detect new models
+
+### Customization
+
+**Appearance Settings** (Settings → Appearance):
+- Choose custom colors for idle, recording, and processing states
+- Adjust window transparency (0.7 - 1.0)
+- Resize the visualizer (60px - 150px)
+- All changes apply instantly
+
+**Hotkey Configuration:**
+- Click the hotkey field in Settings → General
+- Press your desired key combination
+- Visual feedback shows keys as you press them
+- Confirm with checkmark or cancel with X
+
 ### Testing the UI
 
 Run the visual test suite to explore all UI features:
@@ -142,10 +194,10 @@ ui:
 
 See [`config.example.yaml`](config.example.yaml) for all available options.
 
-## 🎯 Why Voice Typing?
+## 🎯 Why Vype?
 
-| Commercial Solutions | Voice Typing |
-|---------------------|--------------|
+| Commercial Solutions | Vype |
+|---------------------|------|
 | ❌ $10-30/month subscriptions | ✅ Free and open source |
 | ❌ Cloud processing (privacy concerns) | ✅ 100% local processing |
 | ❌ Requires internet connection | ✅ Works offline |
@@ -154,7 +206,7 @@ See [`config.example.yaml`](config.example.yaml) for all available options.
 
 ## 🏗️ Architecture
 
-Voice Typing uses a modular architecture that separates concerns:
+Vype uses a modular architecture that separates concerns:
 
 ```
 Audio Capture → STT Engine → Command Processor → Output Handler
@@ -175,8 +227,8 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 Quick Links:
 - [Development Setup](docs/development.md)
-- [Bug Reports](https://github.com/yourusername/voice-typing/issues/new?template=bug_report.md)
-- [Feature Requests](https://github.com/yourusername/voice-typing/issues/new?template=feature_request.md)
+- [Bug Reports](https://github.com/yourusername/vype/issues/new?template=bug_report.md)
+- [Feature Requests](https://github.com/yourusername/vype/issues/new?template=feature_request.md)
 
 ## 📋 Roadmap
 
@@ -188,7 +240,7 @@ Quick Links:
 - [ ] macOS/Linux support
 - [ ] Plugin system for custom STT engines
 
-See [Issues](https://github.com/yourusername/voice-typing/issues) for full roadmap.
+See [Issues](https://github.com/yourusername/vype/issues) for full roadmap.
 
 ## 📜 License
 
@@ -203,8 +255,8 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) for deta
 ## 💬 Support
 
 - 📖 [Documentation](docs/)
-- 🐛 [Issue Tracker](https://github.com/yourusername/voice-typing/issues)
-- 💬 [Discussions](https://github.com/yourusername/voice-typing/discussions)
+- 🐛 [Issue Tracker](https://github.com/yourusername/vype/issues)
+- 💬 [Discussions](https://github.com/yourusername/vype/discussions)
 
 ---
 

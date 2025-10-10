@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from voice_typing.audio.capture import AudioCapture
+from vype.audio.capture import AudioCapture
 
 
 @patch("sounddevice.query_devices")

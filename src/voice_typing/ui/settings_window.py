@@ -288,17 +288,27 @@ class ModernTitleBar(tk.Canvas):
     
     def _start_drag(self, event):
         """Start dragging the window."""
-        self._drag_start_x = event.x
-        self._drag_start_y = event.y
+        # Store absolute screen coordinates and initial window position
+        self._drag_start_x = event.x_root
+        self._drag_start_y = event.y_root
+        try:
+            self._window_start_x = self.parent_window.winfo_x()
+            self._window_start_y = self.parent_window.winfo_y()
+        except:
+            self._window_start_x = 0
+            self._window_start_y = 0
     
     def _on_drag(self, event):
         """Drag the window."""
         try:
-            # Get the parent window
-            window = self.parent_window
-            x = window.winfo_x() + (event.x - self._drag_start_x)
-            y = window.winfo_y() + (event.y - self._drag_start_y)
-            window.geometry(f"+{x}+{y}")
+            # Calculate movement using absolute screen coordinates
+            dx = event.x_root - self._drag_start_x
+            dy = event.y_root - self._drag_start_y
+            
+            # Apply to initial window position
+            x = self._window_start_x + dx
+            y = self._window_start_y + dy
+            self.parent_window.geometry(f"+{x}+{y}")
         except:
             pass
     

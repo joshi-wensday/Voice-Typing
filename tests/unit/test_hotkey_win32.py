@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from voice_typing.ui.hotkey_win32 import parse_hotkey_string, MOD_CONTROL, MOD_SHIFT, VK_MAP
+from vype.ui.hotkey_win32 import parse_hotkey_string, MOD_CONTROL, MOD_SHIFT, VK_MAP
 
 
 def test_parse_ctrl_shift_space() -> None:

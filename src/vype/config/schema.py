@@ -130,7 +130,7 @@ class UIConfig(BaseModel):
 
     # Visualizer overlay
     show_visualizer: bool = True
-    visualizer_size: int = 80  # pixels (reduced for cleaner look)
+    visualizer_size: int = 70  # pixels (reduced for cleaner look)
     visualizer_opacity: float = Field(0.9, ge=0.0, le=1.0)  # Increased for better visibility
     visualizer_position: tuple[int, int] = (100, 100)  # x, y from top-left
 
@@ -140,6 +140,13 @@ class UIConfig(BaseModel):
 
     # Hotkey
     hotkey: str = "ctrl+shift+space"
+    
+    # Appearance customization
+    accent_color_idle: str = "#3b82f6"  # Blue
+    accent_color_recording: str = "#ef4444"  # Red
+    accent_color_processing: str = "#eab308"  # Yellow/Gold
+    settings_window_opacity: float = Field(0.97, ge=0.7, le=1.0)
+    overlay_opacity: float = Field(0.9, ge=0.5, le=1.0)
 
 
 class OutputConfig(BaseModel):

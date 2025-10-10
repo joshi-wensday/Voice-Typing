@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from voice_typing.commands.processor import CommandProcessor
-from voice_typing.commands.definitions import NewLineCommand, PunctuationCommand, InsertTextCommand, StopDictationCommand
-from voice_typing.config.schema import AppConfig, PunctuationMode, CommandConfig
+from vype.commands.processor import CommandProcessor
+from vype.commands.definitions import NewLineCommand, PunctuationCommand, InsertTextCommand, StopDictationCommand
+from vype.config.schema import AppConfig, PunctuationMode, CommandConfig
 
 
 def make_cfg() -> AppConfig:

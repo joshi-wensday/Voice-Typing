@@ -1,4 +1,4 @@
-"""Logging configuration for Voice Typing."""
+"""Logging configuration for Vype."""
 
 from __future__ import annotations
 

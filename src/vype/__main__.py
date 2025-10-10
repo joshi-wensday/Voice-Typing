@@ -1,4 +1,4 @@
-"""Voice Typing entry point.
+"""Vype entry point.
 
 Default behavior: launch tray + hotkey. Use --record-seconds for CLI test harness.
 """
@@ -25,14 +25,14 @@ from .utils.logger import setup_logging, get_logger
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Voice Typing")
+    p = argparse.ArgumentParser(description="Vype - Local Voice Dictation")
     p.add_argument("--record-seconds", type=float, default=None, help="CLI test harness: record duration in seconds")
     return p.parse_args()
 
 
 def _run_cli(record_seconds: float) -> None:
     cfg = ConfigManager()
-    print("Voice Typing: CLI STT test")
+    print("Vype: CLI STT test")
     print(f"Config: {cfg.config_path}")
 
     a_cfg = cfg.config.audio
@@ -78,14 +78,14 @@ def _run_app() -> None:
     logger = setup_logging(
         level=cfgm.config.log_level, log_file=cfgm.config.log_file
     )
-    logger.info("Voice Typing starting...")
+    logger.info("Vype starting...")
     logger.info(f"Config loaded from: {cfgm.config_path}")
 
     # Check for single instance
     instance = SingleInstance()
     if not instance.acquire():
-        logger.warning("Voice Typing is already running")
-        print("Voice Typing is already running.")
+        logger.warning("Vype is already running")
+        print("Vype is already running.")
         return
 
     try:
@@ -113,6 +113,7 @@ def _run_app() -> None:
     )
     overlay.on_toggle = controller.toggle
     overlay.on_settings = settings.show
+    overlay.set_audio_capture(controller.audio)  # Enable real-time spectrum visualization
     if cfgm.config.ui.show_visualizer:
         overlay.show()
 
@@ -137,7 +138,7 @@ def _run_app() -> None:
             active = win32_hk.active_spec or preferred
             logger.info(f"Hotkey registered (Win32): {active}")
             print(f"Hotkey (Win32): {active}")
-            tray.set_tooltip(f"Voice Typing (Win32) — {active}")
+            tray.set_tooltip(f"Vype (Win32) — {active}")
         else:
             hotkey = HotkeyManager(hotkey=preferred, on_toggle=controller.toggle)
             if not hotkey.register():
@@ -146,13 +147,13 @@ def _run_app() -> None:
             else:
                 logger.info(f"Hotkey registered (keyboard): {preferred}")
             print(f"Hotkey (keyboard): {preferred}")
-            tray.set_tooltip(f"Voice Typing (keyboard) — {preferred}")
+            tray.set_tooltip(f"Vype (keyboard) — {preferred}")
     except Exception as e:
         logger.error(f"Hotkey registration error: {e}", exc_info=True)
         print(f"Warning: Hotkey registration failed: {e}")
 
     logger.info("Application ready")
-    print("\n✅ Voice Typing ready! Press your hotkey to start dictating.\n")
+    print("\n✅ Vype ready! Press your hotkey to start dictating.\n")
 
     # Enter Tk mainloop to service settings/overlay UI
     try:

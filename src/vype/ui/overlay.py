@@ -19,6 +19,7 @@ from .effects import (
     lerp,
     clamp,
 )
+from .spectrum_analyzer import SpectrumAnalyzer
 
 
 class Overlay:
@@ -70,8 +71,8 @@ class Overlay:
         self._target_pulse_scale = 1.0
         self._breathing_phase = 0.0
         
-        # Waveform data (circular frequency bars)
-        self._waveform_bars = 48  # Number of bars around the circle
+        # Waveform data (circular frequency bars) - increased for smoother curves
+        self._waveform_bars = 64  # Increased from 48 for smoother visualization
         self._waveform_values = [0.0] * self._waveform_bars
         self._waveform_target_values = [0.0] * self._waveform_bars
         
@@ -87,8 +88,16 @@ class Overlay:
         # Cached gradient images
         self._gradient_cache = {}
         
-        # Performance: update at ~30 FPS (33ms)
-        self._update_interval_ms = 33
+        # Spectrum analyzer for FFT visualization - increased bands and reduced smoothing
+        self._spectrum_analyzer = SpectrumAnalyzer(
+            sample_rate=16000, 
+            num_bands=64,  # Increased from 48 for better frequency resolution
+            smoothing=0.15  # Reduced from 0.3 for more responsive updates
+        )
+        self._audio_capture = None  # Will be set externally if available
+        
+        # Performance: update at ~90 FPS (11ms) for smoother animation
+        self._update_interval_ms = 11  # Increased from 16ms (60fps) to 11ms (90fps)
 
     def _build(self) -> None:
         """Build the overlay window and canvas."""
@@ -99,6 +108,8 @@ class Overlay:
         # Make window transparent (the key to circular appearance!)
         try:
             self.win.attributes("-transparentcolor", "black")
+            # Additional Windows-specific transparency
+            self.win.wm_attributes("-alpha", self.opacity)
         except:
             pass  # Transparency not supported on this platform
         
@@ -110,9 +121,11 @@ class Overlay:
             width=self.size,
             height=self.size,
             bg="black",
-            highlightthickness=0
+            highlightthickness=0,
+            borderwidth=0,
+            relief='flat'
         )
-        self.canvas.pack()
+        self.canvas.pack(fill=tk.BOTH, expand=True)
         
         # Event bindings
         self.canvas.bind('<ButtonPress-1>', self._on_left_press)
@@ -134,6 +147,14 @@ class Overlay:
         if state != self._target_state:
             self._target_state = state
             self._state_transition_progress = 0.0
+    
+    def set_audio_capture(self, audio_capture) -> None:
+        """Set the audio capture instance for real-time spectrum visualization.
+        
+        Args:
+            audio_capture: AudioCapture instance
+        """
+        self._audio_capture = audio_capture
 
     def _update_state_transition(self) -> None:
         """Update state transition animation."""
@@ -154,6 +175,20 @@ class Overlay:
         Returns:
             Tuple of (inner_color, mid_color, outer_color)
         """
+        # Get colors from config if available
+        if self.config_manager:
+            cfg = self.config_manager.config.ui
+            if state == "recording":
+                base = cfg.accent_color_recording
+                return (base, '#f59e0b', '#7c2d12')
+            elif state == "processing":
+                base = cfg.accent_color_processing
+                return (base, '#f59e0b', '#78350f')
+            else:  # idle
+                base = cfg.accent_color_idle
+                return (base, '#8b5cf6', '#1e293b')
+        
+        # Fallback to defaults
         if state == "recording":
             return ('#ef4444', '#f59e0b', '#7c2d12')
         elif state == "processing":
@@ -235,21 +270,44 @@ class Overlay:
 
     def _update_waveform(self, level: float) -> None:
         """Update waveform bar values with smooth interpolation."""
-        # Generate semi-random waveform based on level and animation frame
-        # This simulates frequency bars
-        for i in range(self._waveform_bars):
-            # Create variation across bars using sine waves
-            phase_offset = (i / self._waveform_bars) * 2 * math.pi
-            variation = (math.sin(self._animation_frame * 0.1 + phase_offset) + 1) / 2
-            target = level * (0.3 + variation * 0.7)
-            
-            # Smooth interpolation to target
-            self._waveform_target_values[i] = target
-            self._waveform_values[i] = lerp(
-                self._waveform_values[i],
-                self._waveform_target_values[i],
-                0.3  # Smoothing factor
-            )
+        # Always try to get real spectrum data when recording OR processing
+        if self._audio_capture is not None and (self._target_state == "recording" or self._target_state == "processing"):
+            try:
+                audio_chunk = self._audio_capture.get_latest_chunk()
+                if audio_chunk.size > 100:  # Need enough samples for FFT
+                    # Get real frequency spectrum
+                    spectrum = self._spectrum_analyzer.analyze(audio_chunk)
+                    # Apply moderate boosting for visibility (reduced since we now have noise floor)
+                    for i in range(min(len(spectrum), self._waveform_bars)):
+                        # Apply power scaling to make differences more visible
+                        boosted = spectrum[i] ** 0.75  # Power < 1 boosts small values
+                        # Faster interpolation for more responsive updates
+                        self._waveform_values[i] = lerp(
+                            self._waveform_values[i],
+                            boosted * 1.2,  # Moderate scale up
+                            0.4  # Increased from implicit direct assignment for smooth but responsive updates
+                        )
+                    return
+            except Exception:
+                pass  # Fall back to pseudo-spectrum
+        
+        # Idle state or fallback: fade to zero
+        if self._target_state == "idle":
+            for i in range(self._waveform_bars):
+                self._waveform_values[i] = lerp(self._waveform_values[i], 0.0, 0.15)  # Slightly faster fade
+        else:
+            # Fallback for other states
+            for i in range(self._waveform_bars):
+                phase_offset = (i / self._waveform_bars) * 2 * math.pi
+                variation = (math.sin(self._animation_frame * 0.1 + phase_offset) + 1) / 2
+                target = level * (0.3 + variation * 0.7)
+                
+                self._waveform_target_values[i] = target
+                self._waveform_values[i] = lerp(
+                    self._waveform_values[i],
+                    self._waveform_target_values[i],
+                    0.4  # Increased from 0.3 for faster response
+                )
 
     def _draw_vibrating_edge(self, cx: float, cy: float, base_radius: float, level: float) -> None:
         """Draw vibrating edge effect for the circle.
@@ -272,7 +330,19 @@ class Overlay:
             angle = (2 * math.pi * i / num_points)
             
             # Calculate vibration amount based on waveform value
-            vibration = self._waveform_values[i % num_points] * (self.size / 8)
+            # Apply noise floor threshold to reduce baseline jitter
+            waveform_value = self._waveform_values[i % num_points]
+            noise_floor = 0.35  # Ignore values below this threshold (increased for better noise rejection)
+            if waveform_value < noise_floor:
+                waveform_value = 0.0
+            else:
+                # Subtract noise floor and rescale to 0-1 range
+                waveform_value = (waveform_value - noise_floor) / (1.0 - noise_floor)
+                # Apply additional exponential curve to emphasize stronger signals
+                waveform_value = waveform_value ** 1.5
+            
+            # Vibration distance - balance between visibility and edge clipping
+            vibration = waveform_value * (self.size / 9)  # Increased from /12 for more pronounced movement
             
             # Add vibration to radius
             current_radius = base_radius + vibration
@@ -289,8 +359,18 @@ class Overlay:
             glow_points = []
             for i in range(num_points + 1):
                 angle = (2 * math.pi * i / num_points)
-                vibration = self._waveform_values[i % num_points] * (self.size / 8)
-                glow_radius = base_radius + vibration + 3
+                
+                # Apply same noise floor threshold
+                waveform_value = self._waveform_values[i % num_points]
+                if waveform_value < noise_floor:
+                    waveform_value = 0.0
+                else:
+                    waveform_value = (waveform_value - noise_floor) / (1.0 - noise_floor)
+                    # Apply additional exponential curve to emphasize stronger signals
+                    waveform_value = waveform_value ** 1.5
+                
+                vibration = waveform_value * (self.size / 9)
+                glow_radius = base_radius + vibration + 2  # Glow offset
                 
                 x = cx + glow_radius * math.cos(angle)
                 y = cy + glow_radius * math.sin(angle)
@@ -345,22 +425,9 @@ class Overlay:
 
     def _draw_hover_effect(self, cx: float, cy: float, radius: float) -> None:
         """Draw hover highlight effect."""
-        if not self.canvas or self._hover_alpha <= 0:
-            return
-        
-        # Create a subtle highlight ring
-        highlight_radius = radius * 1.3
-        alpha_int = int(self._hover_alpha * 100)
-        
-        # Use a light color with transparency effect (simulated with lighter shade)
-        highlight_color = '#ffffff'
-        
-        self.canvas.create_oval(
-            cx - highlight_radius, cy - highlight_radius,
-            cx + highlight_radius, cy + highlight_radius,
-            outline=highlight_color,
-            width=1,
-        )
+        # Hover effect disabled as requested by user
+        # The white circle was too distracting
+        pass
 
     def _draw_ripple_effect(self, cx: float, cy: float) -> None:
         """Draw click ripple animation."""
@@ -430,13 +497,6 @@ class Overlay:
         
         # Clear canvas
         self.canvas.delete('all')
-        
-        # Draw gradient background
-        colors = self._interpolate_state_colors()
-        gradient = self._create_gradient_background(colors)
-        self.canvas.create_image(0, 0, image=gradient, anchor=tk.NW)
-        # Keep reference to prevent garbage collection
-        self.canvas.image = gradient
         
         # Calculate positions
         cx = cy = self.size / 2

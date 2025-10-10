@@ -166,6 +166,17 @@ class VoiceTypingController:
             self._stream_thread.join(timeout=2.0)
 
     def toggle(self) -> None:
+        """Toggle dictation on/off.
+        
+        Prevents toggling while in processing state to avoid race conditions.
+        """
+        # Prevent toggle while processing to avoid state conflicts
+        if self.state.processing:
+            print("[Controller] Toggle ignored - currently processing")
+            return
+        
+        print(f"[Controller] Toggle called - recording={self.state.recording}, processing={self.state.processing}")
+        
         if not self.state.recording:
             self.start_dictation()
         else:

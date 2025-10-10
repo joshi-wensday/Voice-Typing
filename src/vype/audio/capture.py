@@ -42,6 +42,10 @@ class AudioCapture:
         self._buffer: list[np.ndarray] = []
         self._buffer_lock = threading.Lock()
         self._level: float = 0.0
+        
+        # For real-time visualization
+        self._latest_chunk: np.ndarray = np.zeros(0, dtype=np.float32)
+        self._chunk_lock = threading.Lock()
 
         self._stream: sd.InputStream | None = None
         self._is_recording = False
@@ -98,6 +102,10 @@ class AudioCapture:
 
         with self._buffer_lock:
             self._buffer.append(mono.copy())
+        
+        # Store latest chunk for visualization
+        with self._chunk_lock:
+            self._latest_chunk = mono.copy()
 
     def _sd_callback(self, indata: np.ndarray, frames: int, time: Any, status: sd.CallbackFlags) -> None:
         if status:
@@ -156,3 +164,12 @@ class AudioCapture:
     def get_level(self) -> float:
         """Get recent RMS audio level in [0.0, 1.0]."""
         return self._level
+    
+    def get_latest_chunk(self) -> np.ndarray:
+        """Get the latest audio chunk for visualization.
+        
+        Returns:
+            1-D numpy array of float32 samples in range [-1, 1]
+        """
+        with self._chunk_lock:
+            return self._latest_chunk.copy() if self._latest_chunk.size > 0 else np.zeros(0, dtype=np.float32)
