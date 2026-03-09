@@ -1,6 +1,5 @@
-"""Speech-to-text engines and interfaces."""
+"""Speech-to-text engines."""
 
 from .canary_engine import CanaryQwenEngine
-from .whisper_engine import FasterWhisperEngine
 
-__all__ = ["FasterWhisperEngine", "CanaryQwenEngine"]
+__all__ = ["CanaryQwenEngine"]

@@ -1,11 +1,8 @@
-"""Output handler that injects text and executes commands via strategies."""
+"""Output handler that injects text and sends key-presses via strategies."""
 
 from __future__ import annotations
 
-from typing import Iterable, List
-
 from ..config.schema import AppConfig
-from ..commands.definitions import Command, InsertTextCommand, NewLineCommand, PunctuationCommand
 from .strategies.keyboard import KeyboardStrategy
 from .strategies.uia import UIAStrategy
 from .strategies.clipboard import ClipboardStrategy
@@ -34,8 +31,12 @@ class OutputHandler:
         return order
 
     def inject_text(self, text: str) -> bool:
+        """Type text into the focused application."""
         # Prefer clipboard for long text to reduce latency
-        if len(text) >= self.config.output.prefer_clipboard_over_chars and self._clipboard.is_available():
+        if (
+            len(text) >= self.config.output.prefer_clipboard_over_chars
+            and self._clipboard.is_available()
+        ):
             if self._clipboard.inject_text(text):
                 return True
         for strat in self._strategies:
@@ -44,16 +45,8 @@ class OutputHandler:
         return False
 
     def press_key(self, key: str) -> bool:
+        """Send a key-press (e.g. 'backspace', 'ctrl+z') to the focused application."""
         for strat in self._strategies:
             if getattr(strat, "is_available")() and strat.press_key(key):
                 return True
         return False
-
-    def execute_command(self, command: Command) -> bool:
-        if isinstance(command, InsertTextCommand):
-            return self.inject_text(command.text)
-        if isinstance(command, NewLineCommand):
-            return self.inject_text("\n")
-        if isinstance(command, PunctuationCommand):
-            return self.inject_text(command.symbol)
-        return True

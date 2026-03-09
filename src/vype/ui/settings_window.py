@@ -12,7 +12,6 @@ from PIL import Image, ImageDraw, ImageTk
 from ..config.manager import ConfigManager
 from ..audio.capture import AudioCapture
 from ..stt.model_manager import ModelManager
-from ..stt.model_tester import ModelTester
 from .effects import ColorTheme, create_card_frame, ease_out_sine, interpolate_color
 from .hotkey_capture import HotkeyCapture
 
@@ -256,8 +255,6 @@ class SettingsWindow:
         ("🎙", "General"),
         ("🔊", "Speech"),
         ("🎚", "Audio"),
-        ("⌨", "Commands"),
-        ("🧠", "Brain / AI"),
         ("🎨", "Appearance"),
         ("⚙", "Advanced"),
         ("📦", "Models"),
@@ -274,7 +271,6 @@ class SettingsWindow:
         self._nav_buttons: list[tk.Canvas] = []
 
         self.model_manager = ModelManager()
-        self.model_tester = ModelTester()
         self._original_config = None
 
         # Footer status label (created in _build_footer)
@@ -512,8 +508,6 @@ class SettingsWindow:
         self._build_general_panel(self._panels["General"])
         self._build_speech_panel(self._panels["Speech"])
         self._build_audio_panel(self._panels["Audio"])
-        self._build_commands_panel(self._panels["Commands"])
-        self._build_brain_panel(self._panels["Brain / AI"])
         self._build_appearance_panel(self._panels["Appearance"])
         self._build_advanced_panel(self._panels["Advanced"])
         self._build_models_panel(self._panels["Models"])
@@ -636,28 +630,25 @@ class SettingsWindow:
         ).pack(anchor="w", pady=3)
 
     def _build_speech_panel(self, panel: tk.Frame) -> None:
-        self._panel_header(panel, "Speech", "Speech-to-text model and compute settings")
+        self._panel_header(panel, "Speech", "Canary STT model and inference settings")
 
         # ── Model card ─────────────────────────────────────────────────
         body = self._make_card(
             panel, "STT Model",
-            "Larger models are more accurate but slower. Restart required after changes.",
+            "Select the NVIDIA Canary model variant. Restart required after changes.",
         )
-        # Backend selector (controls which options are shown)
-        inferred_backend = "nemo" if str(self.cfgm.config.stt.model) == "canary-qwen-2.5b" else "whisper"
-        cfg_backend = getattr(self.cfgm.config.stt, "backend", inferred_backend)
-
-        wc0 = self._card_row(body, "Backend", "Whisper (faster-whisper) or NeMo (Canary)")
-        self.var_backend = tk.StringVar(master=self.win, value=str(cfg_backend))
-        self.backend_combo = self._make_combobox(
-            wc0, textvariable=self.var_backend, values=["whisper", "nemo"], width=20
-        )
-        self.backend_combo.pack(anchor="w")
-
-        wc = self._card_row(body, "Model", "Options depend on backend")
+        wc = self._card_row(body, "Model", "Canary model to use for transcription")
         self.var_model = tk.StringVar(master=self.win, value=self.cfgm.config.stt.model)
-        self.model_combo = self._make_combobox(wc, textvariable=self.var_model, values=[], width=20)
-        self.model_combo.pack(anchor="w")
+        self._make_combobox(
+            wc, textvariable=self.var_model,
+            values=[
+                "nvidia/canary-qwen-2.5b",
+                "nvidia/canary-1b",
+                "nvidia/canary-1b-flash",
+                "nvidia/canary-1b-v2",
+            ],
+            width=28,
+        ).pack(anchor="w")
 
         wc2 = self._card_row(body, "Device", "Restart required")
         self.var_device = tk.StringVar(master=self.win, value=self.cfgm.config.stt.device)
@@ -666,85 +657,49 @@ class SettingsWindow:
             values=["auto", "cpu", "cuda"], width=20,
         ).pack(anchor="w")
 
-        wc3 = self._card_row(body, "Compute Type",
-                              "int8_float16 is fastest on CUDA")
-        self.var_compute = tk.StringVar(master=self.win, value=self.cfgm.config.stt.compute_type)
-        self._make_combobox(
-            wc3, textvariable=self.var_compute,
-            values=["float16", "float32", "int8", "int8_float16"], width=20,
-        ).pack(anchor="w")
-
-        wc4 = self._card_row(body, "Language", "e.g. en, fr, de — leave blank for auto")
+        wc3 = self._card_row(body, "Language", "e.g. en, fr, de")
         self.var_language = tk.StringVar(
             master=self.win, value=getattr(self.cfgm.config.stt, 'language', 'en'),
         )
-        ModernEntry(wc4, textvariable=self.var_language, width=10).pack(anchor="w")
+        ModernEntry(wc3, textvariable=self.var_language, width=10).pack(anchor="w")
 
-        # Keep row handles so we can hide/show based on backend choice
-        self._stt_row_model = wc.master
-        self._stt_row_compute = wc3.master
-        self._stt_row_language = wc4.master
-
-        def _sync_backend_ui(*_args) -> None:
-            backend = (self.var_backend.get() or "whisper").strip().lower()
-
-            if backend == "nemo":
-                # NeMo backend currently exposes Canary only in this app.
-                self.model_combo.configure(values=["canary-qwen-2.5b"])
-                if self.var_model.get().strip().lower() != "canary-qwen-2.5b":
-                    self.var_model.set("canary-qwen-2.5b")
-
-                # Hide Whisper-only compute_type for NeMo
-                self._stt_row_compute.pack_forget()
-
-                # Canary is English-only; keep the field but nudge towards "en"
-                if not self.var_language.get().strip():
-                    self.var_language.set("en")
-            else:
-                # Whisper backend
-                self.model_combo.configure(values=["tiny", "base", "small", "medium", "large-v2", "large-v3"])
-                if self.var_model.get().strip().lower() == "canary-qwen-2.5b":
-                    self.var_model.set("large-v3")
-
-                # Ensure compute_type row is visible (pack again in original order)
-                if not self._stt_row_compute.winfo_ismapped():
-                    self._stt_row_compute.pack(fill=tk.X, pady=5)
-
-        def _sync_backend_from_model(*_args) -> None:
-            model = (self.var_model.get() or "").strip().lower()
-            if model == "canary-qwen-2.5b":
-                if (self.var_backend.get() or "").strip().lower() != "nemo":
-                    self.var_backend.set("nemo")
-            else:
-                if (self.var_backend.get() or "").strip().lower() == "nemo":
-                    # If user flips model away from canary, keep backend as-is (they may want NeMo later).
-                    pass
-
-        self.var_backend.trace_add("write", _sync_backend_ui)
-        self.var_model.trace_add("write", _sync_backend_from_model)
-        _sync_backend_ui()
-
-        # ── Post-processing card ────────────────────────────────────────
+        # ── Inference card ─────────────────────────────────────────────
         body2 = self._make_card(
-            panel, "Post-Processing",
-            "Requires the Brain / AI module (Ollama) to be enabled.",
+            panel, "Inference",
+            "Controls token generation and punctuation/capitalisation output.",
         )
-        self.var_remove_fillers = tk.BooleanVar(
+        wc4 = self._card_row(body2, "Max New Tokens",
+                              "Maximum tokens per segment (64–512)")
+        self.var_max_new_tokens = tk.IntVar(
             master=self.win,
-            value=getattr(self.cfgm.config.stt, 'remove_filler_words', False),
+            value=getattr(self.cfgm.config.stt, 'max_new_tokens', 256),
         )
-        self._make_checkbutton(
-            body2, "Remove filler words (um, uh, like…)", self.var_remove_fillers,
-        ).pack(anchor="w", pady=3)
+        ModernSlider(wc4, variable=self.var_max_new_tokens,
+                     from_=64, to=512, resolution=1, width=200).pack(anchor="w")
 
-        self.var_improve_grammar = tk.BooleanVar(
+        self.var_enable_pnc = tk.BooleanVar(
             master=self.win,
-            value=getattr(self.cfgm.config.stt, 'improve_grammar', False),
+            value=getattr(self.cfgm.config.stt, 'enable_pnc', True),
         )
         self._make_checkbutton(
-            body2, "Improve grammar with context-aware corrections",
-            self.var_improve_grammar,
-        ).pack(anchor="w", pady=3)
+            body2, "Enable punctuation & capitalisation (PnC)",
+            self.var_enable_pnc,
+        ).pack(anchor="w", pady=(6, 3))
+
+        wc5 = self._card_row(body2, "Context Tail (chars)",
+                              "Characters of prior transcript fed as context (100–800)")
+        self.var_context_tail_chars = tk.IntVar(
+            master=self.win,
+            value=getattr(self.cfgm.config.stt, 'context_tail_chars', 400),
+        )
+        tk.Spinbox(
+            wc5, from_=100, to=800, increment=50,
+            textvariable=self.var_context_tail_chars,
+            bg=ColorTheme.BG_CARD, fg=ColorTheme.TEXT_PRIMARY,
+            insertbackground=ColorTheme.TEXT_PRIMARY,
+            relief=tk.FLAT, font=('Segoe UI', 10), width=7,
+            buttonbackground=ColorTheme.BORDER,
+        ).pack(anchor="w")
 
     def _build_audio_panel(self, panel: tk.Frame) -> None:
         self._panel_header(panel, "Audio", "Microphone and voice-activity detection")
@@ -764,7 +719,7 @@ class SettingsWindow:
             values=["default"] + device_names, width=34,
         ).pack(anchor="w")
 
-        wc2 = self._card_row(body, "Sample Rate", "16000 Hz recommended for Whisper")
+        wc2 = self._card_row(body, "Sample Rate", "16000 Hz required for Canary")
         self.var_sr = tk.IntVar(master=self.win, value=self.cfgm.config.audio.sample_rate)
         ModernEntry(wc2, textvariable=self.var_sr, width=10).pack(anchor="w")
 
@@ -803,126 +758,6 @@ class SettingsWindow:
             master=self.win, value=self.cfgm.config.vad.min_silence_duration_ms,
         )
         ModernEntry(wc6, textvariable=self.var_vad_min_silence, width=8).pack(anchor="w")
-
-    def _build_commands_panel(self, panel: tk.Frame) -> None:
-        self._panel_header(panel, "Commands",
-                           "Voice commands and punctuation handling")
-
-        # ── Voice commands card ────────────────────────────────────────
-        body = self._make_card(
-            panel, "Voice Commands",
-            "Say phrases like 'new line', 'stop dictation', 'undo' to trigger actions.",
-        )
-        self.var_commands_enabled = tk.BooleanVar(
-            master=self.win, value=self.cfgm.config.commands.enabled,
-        )
-        self._make_checkbutton(
-            body, "Enable voice commands", self.var_commands_enabled,
-        ).pack(anchor="w", pady=3)
-
-        # ── Punctuation card ───────────────────────────────────────────
-        body2 = self._make_card(
-            panel, "Punctuation",
-            "Auto mode uses Whisper's built-in punctuation. "
-            "Manual lets you say 'period', 'comma', etc. "
-            "Hybrid uses both (voice commands override auto).",
-        )
-        wc = self._card_row(body2, "Punctuation Mode")
-        self.var_punct_mode = tk.StringVar(
-            master=self.win, value=self.cfgm.config.punctuation.mode,
-        )
-        self._make_combobox(
-            wc, textvariable=self.var_punct_mode,
-            values=["auto", "manual", "hybrid"], width=16,
-        ).pack(anchor="w")
-
-        self.var_auto_capitalize = tk.BooleanVar(
-            master=self.win, value=self.cfgm.config.punctuation.auto_capitalize,
-        )
-        self._make_checkbutton(
-            body2, "Auto-capitalise start of sentences",
-            self.var_auto_capitalize,
-        ).pack(anchor="w", pady=(6, 3))
-
-    def _build_brain_panel(self, panel: tk.Frame) -> None:
-        self._panel_header(panel, "Brain / AI",
-                           "Local LLM integration via Ollama for enhanced transcription")
-
-        # ── Connection card ────────────────────────────────────────────
-        body = self._make_card(
-            panel, "Ollama Connection",
-            "Ollama must be running locally. Install from ollama.com.",
-        )
-        self.var_brain_enabled = tk.BooleanVar(
-            master=self.win, value=self.cfgm.config.brain.enabled,
-        )
-        self._make_checkbutton(
-            body, "Enable AI Brain (requires Ollama)", self.var_brain_enabled,
-        ).pack(anchor="w", pady=(0, 6))
-
-        wc = self._card_row(body, "Endpoint URL", "Default: http://localhost:11434")
-        self.var_brain_endpoint = tk.StringVar(
-            master=self.win, value=self.cfgm.config.brain.endpoint,
-        )
-        ModernEntry(wc, textvariable=self.var_brain_endpoint, width=28).pack(anchor="w")
-
-        wc2 = self._card_row(body, "LLM Model",
-                              "Must be pulled in Ollama first")
-        self.var_brain_model = tk.StringVar(
-            master=self.win, value=self.cfgm.config.brain.model,
-        )
-        self._make_combobox(
-            wc2, textvariable=self.var_brain_model,
-            values=["llama3.2", "llama3", "llama3.1", "mistral", "mistral-nemo",
-                    "phi3", "gemma2", "qwen2.5"],
-            width=24,
-        ).pack(anchor="w")
-
-        wc3 = self._card_row(body, "Timeout (s)", "Max wait for LLM response")
-        self.var_brain_timeout = tk.DoubleVar(
-            master=self.win, value=self.cfgm.config.brain.timeout_sec,
-        )
-        ModernSlider(wc3, variable=self.var_brain_timeout,
-                     from_=1.0, to=30.0, resolution=0.5, width=160).pack(anchor="w")
-
-        # ── Feature toggles card ───────────────────────────────────────
-        body2 = self._make_card(
-            panel, "Features",
-            "Each feature adds latency.  Disable if your LLM is slow.",
-        )
-        self.var_intent_routing = tk.BooleanVar(
-            master=self.win, value=self.cfgm.config.brain.intent_routing_enabled,
-        )
-        self._make_checkbutton(
-            body2, "Intent routing  (map phrases to commands)",
-            self.var_intent_routing,
-        ).pack(anchor="w", pady=3)
-
-        self.var_refinement = tk.BooleanVar(
-            master=self.win, value=self.cfgm.config.brain.refinement_enabled,
-        )
-        self._make_checkbutton(
-            body2, "Text refinement  (grammar + filler removal)",
-            self.var_refinement,
-        ).pack(anchor="w", pady=3)
-
-        self.var_context_summarizer = tk.BooleanVar(
-            master=self.win, value=self.cfgm.config.brain.context_summarizer_enabled,
-        )
-        self._make_checkbutton(
-            body2, "Context summariser  (rolling transcript window)",
-            self.var_context_summarizer,
-        ).pack(anchor="w", pady=3)
-
-        # Context window card
-        body3 = self._make_card(panel, "Context Window")
-        wc4 = self._card_row(body3, "Window (seconds)",
-                              "How many seconds of transcript to keep in context")
-        self.var_context_window = tk.DoubleVar(
-            master=self.win, value=self.cfgm.config.brain.context_window_sec,
-        )
-        ModernSlider(wc4, variable=self.var_context_window,
-                     from_=30.0, to=300.0, resolution=10.0, width=180).pack(anchor="w")
 
     def _build_appearance_panel(self, panel: tk.Frame) -> None:
         self._panel_header(panel, "Appearance",
@@ -985,57 +820,25 @@ class SettingsWindow:
 
     def _build_advanced_panel(self, panel: tk.Frame) -> None:
         self._panel_header(panel, "Advanced",
-                           "Streaming, decoding, and text-output tuning")
+                           "Streaming segmentation and text-output tuning")
 
         # ── Streaming card ─────────────────────────────────────────────
         body = self._make_card(
             panel, "Streaming & Segmentation",
-            "Controls how audio is chunked before being sent to Whisper.",
+            "Controls how VAD audio segments are measured before transcription.",
         )
-        wc = self._card_row(body, "Segmentation")
-        self.var_seg = tk.StringVar(
-            master=self.win, value=self.cfgm.config.streaming.segmentation,
-        )
-        self._make_combobox(wc, textvariable=self.var_seg,
-                            values=["vad", "energy"], width=14).pack(anchor="w")
-
         wc2 = self._card_row(body, "Min Segment (s)")
         self.var_min_seg = tk.DoubleVar(
             master=self.win, value=self.cfgm.config.streaming.min_segment_sec,
         )
         ModernEntry(wc2, textvariable=self.var_min_seg, width=8).pack(anchor="w")
 
-        wc3 = self._card_row(body, "Min Silence (s)")
-        self.var_min_sil = tk.DoubleVar(
-            master=self.win, value=self.cfgm.config.streaming.min_silence_sec,
-        )
-        ModernEntry(wc3, textvariable=self.var_min_sil, width=8).pack(anchor="w")
-
         wc4 = self._card_row(body, "Energy Threshold",
-                              "Used when segmentation=energy")
+                              "RMS floor — segments below this are silently discarded")
         self.var_energy = tk.DoubleVar(
             master=self.win, value=self.cfgm.config.streaming.energy_threshold,
         )
         ModernEntry(wc4, textvariable=self.var_energy, width=8).pack(anchor="w")
-
-        # ── Decoding card ──────────────────────────────────────────────
-        body2 = self._make_card(
-            panel, "Decoding",
-            "Whisper beam search and sampling parameters.",
-        )
-        wc5 = self._card_row(body2, "Beam Size",
-                             "Higher = more accurate, slower  (1–10)")
-        self.var_beam = tk.IntVar(
-            master=self.win, value=self.cfgm.config.decoding.beam_size,
-        )
-        ModernEntry(wc5, textvariable=self.var_beam, width=8).pack(anchor="w")
-
-        wc6 = self._card_row(body2, "Temperature",
-                             "0.0 = deterministic (recommended)")
-        self.var_temp = tk.DoubleVar(
-            master=self.win, value=self.cfgm.config.decoding.temperature,
-        )
-        ModernEntry(wc6, textvariable=self.var_temp, width=8).pack(anchor="w")
 
         # ── Output card ────────────────────────────────────────────────
         body3 = self._make_card(
@@ -1062,7 +865,7 @@ class SettingsWindow:
 
     def _build_models_panel(self, panel: tk.Frame) -> None:
         self._panel_header(panel, "Models",
-                           "Install, download, and benchmark Whisper models")
+                           "Cache and inspect NVIDIA Canary models")
 
         # ── Installed card ─────────────────────────────────────────────
         body = self._make_card(panel, "Installed Models")
@@ -1081,10 +884,16 @@ class SettingsWindow:
         )
         dl_row = tk.Frame(body2, bg=ColorTheme.BG_CARD_RAISED)
         dl_row.pack(fill=tk.X, pady=(0, 6))
-        self.var_download_model = tk.StringVar(value="base")
+        self.var_download_model = tk.StringVar(value="nvidia/canary-1b")
         self._make_combobox(
             dl_row, textvariable=self.var_download_model,
-            values=list(self.model_manager.AVAILABLE_MODELS.keys()), width=18,
+            values=[
+                "nvidia/canary-qwen-2.5b",
+                "nvidia/canary-1b",
+                "nvidia/canary-1b-flash",
+                "nvidia/canary-1b-v2",
+            ],
+            width=28,
         ).pack(side=tk.LEFT, padx=(0, 10))
         ModernButton(
             dl_row, text="Download", command=self._download_selected_model,
@@ -1238,7 +1047,7 @@ class SettingsWindow:
             for model in installed:
                 tk.Label(
                     self.installed_models_list,
-                    text=f"✓  {model.name}  ({model.parameters}, {model.size_mb} MB)",
+                    text=f"✓  {model.name}  ({model.parameters}, ~{model.size_gb:.0f} GB)",
                     bg=ColorTheme.BG_CARD_RAISED, fg=ColorTheme.TEXT_PRIMARY,
                     font=("Segoe UI", 9),
                 ).pack(anchor="w", pady=2)
@@ -1249,14 +1058,16 @@ class SettingsWindow:
         cached_dir = hub / "models--nvidia--canary-qwen-2.5b"
         cached = cached_dir.exists()
 
-        backend = (getattr(self.cfgm.config.stt, "backend", "") or "").strip().lower()
         selected_model = str(self.cfgm.config.stt.model)
 
         parts = []
-        parts.append(f"Backend selected: {backend or 'whisper'}")
-        parts.append(f"Model selected: {selected_model}")
-        parts.append("✓ Canary cache found" if cached else "• Canary cache not found (will download on first use)")
-        parts.append('Install backend: `pip install -e ".[canary]"`')
+        parts.append(f"Active model: {selected_model}")
+        parts.append(
+            "✓ canary-qwen-2.5b cache found"
+            if cached
+            else "• canary-qwen-2.5b not cached yet — will auto-download on first use"
+        )
+        parts.append("NeMo is installed as a primary dependency (nemo_toolkit[asr]).")
 
         if getattr(self, "_nemo_status_label", None):
             self._nemo_status_label.configure(text="\n".join(parts))
@@ -1280,8 +1091,7 @@ class SettingsWindow:
         if info:
             self.model_info_label.configure(text=(
                 f"{info.description}  —  "
-                f"{info.size_mb} MB  |  {info.parameters}  |  "
-                f"Speed: {info.relative_speed}  |  Accuracy: {info.accuracy}"
+                f"~{info.size_gb:.0f} GB  |  {info.parameters}"
             ))
 
     def _download_selected_model(self) -> None:
@@ -1298,34 +1108,10 @@ class SettingsWindow:
             messagebox.showwarning("Warning", "Could not open model directory.")
 
     def _test_models(self) -> None:
-        installed = self.model_manager.list_installed_models()
-        if not installed:
-            messagebox.showinfo("No Models", "No models installed to test.")
-            return
-        model_names = [m.name for m in installed]
-        self.test_results_text.configure(state=tk.NORMAL)
-        self.test_results_text.delete(1.0, tk.END)
-        self.test_results_text.insert(tk.END, "Testing models, please wait…\n")
-        self.test_results_text.configure(state=tk.DISABLED)
-        self.test_results_text.update()
-
-        def _progress(message: str) -> None:
-            self.test_results_text.configure(state=tk.NORMAL)
-            self.test_results_text.insert(tk.END, f"{message}\n")
-            self.test_results_text.configure(state=tk.DISABLED)
-            self.test_results_text.update()
-
-        results = self.model_tester.test_all_models(
-            model_names,
-            device=self.cfgm.config.stt.device,
-            compute_type=self.cfgm.config.stt.compute_type,
-            progress_callback=_progress,
+        messagebox.showinfo(
+            "Benchmarking",
+            "Model benchmarking is not available for Canary models in this release.",
         )
-        table = self.model_tester.format_results_table(results)
-        self.test_results_text.configure(state=tk.NORMAL)
-        self.test_results_text.delete(1.0, tk.END)
-        self.test_results_text.insert(tk.END, table)
-        self.test_results_text.configure(state=tk.DISABLED)
 
     # ------------------------------------------------------------------
     # Save / reset / animate
@@ -1349,10 +1135,8 @@ class SettingsWindow:
     def _save(self) -> None:
         try:
             hk = self.var_hotkey.get().strip()
-            backend = (getattr(self, "var_backend", None).get().strip() if hasattr(self, "var_backend") else "whisper")
             model = self.var_model.get().strip()
             device = self.var_device.get().strip()
-            compute = self.var_compute.get().strip()
             language = self.var_language.get().strip()
             sr = int(self.var_sr.get())
             device_id_raw = self.var_device_id.get()
@@ -1363,10 +1147,8 @@ class SettingsWindow:
                 did = int(device_id_raw.split(":", 1)[0]) if ":" in device_id_raw else int(device_id_raw)
 
             needs_restart = (
-                backend != str(getattr(self.cfgm.config.stt, "backend", "whisper"))
-                or model != self.cfgm.config.stt.model
+                model != self.cfgm.config.stt.model
                 or device != self.cfgm.config.stt.device
-                or compute != self.cfgm.config.stt.compute_type
             )
 
             self.cfgm.update(
@@ -1375,13 +1157,12 @@ class SettingsWindow:
                 ui__start_minimized=self.var_start_minimized.get(),
                 ui__close_to_tray=self.var_close_to_tray.get(),
                 # Speech
-                stt__backend=backend,
                 stt__model=model,
                 stt__device=device,
-                stt__compute_type=compute,
                 stt__language=language,
-                stt__remove_filler_words=self.var_remove_fillers.get(),
-                stt__improve_grammar=self.var_improve_grammar.get(),
+                stt__max_new_tokens=int(self.var_max_new_tokens.get()),
+                stt__enable_pnc=self.var_enable_pnc.get(),
+                stt__context_tail_chars=int(self.var_context_tail_chars.get()),
                 # Audio
                 audio__sample_rate=sr,
                 audio__device_id=did,
@@ -1389,19 +1170,6 @@ class SettingsWindow:
                 vad__threshold=float(self.var_vad_threshold.get()),
                 vad__min_speech_duration_ms=int(self.var_vad_min_speech.get()),
                 vad__min_silence_duration_ms=int(self.var_vad_min_silence.get()),
-                # Commands
-                commands__enabled=self.var_commands_enabled.get(),
-                punctuation__mode=self.var_punct_mode.get().strip(),
-                punctuation__auto_capitalize=self.var_auto_capitalize.get(),
-                # Brain / AI
-                brain__enabled=self.var_brain_enabled.get(),
-                brain__endpoint=self.var_brain_endpoint.get().strip(),
-                brain__model=self.var_brain_model.get().strip(),
-                brain__timeout_sec=float(self.var_brain_timeout.get()),
-                brain__intent_routing_enabled=self.var_intent_routing.get(),
-                brain__refinement_enabled=self.var_refinement.get(),
-                brain__context_summarizer_enabled=self.var_context_summarizer.get(),
-                brain__context_window_sec=float(self.var_context_window.get()),
                 # Appearance
                 ui__accent_color_idle=self.var_color_idle.get().strip(),
                 ui__accent_color_recording=self.var_color_recording.get().strip(),
@@ -1410,13 +1178,8 @@ class SettingsWindow:
                 ui__overlay_opacity=float(self.var_overlay_opacity.get()),
                 ui__settings_window_opacity=float(self.var_settings_opacity.get()),
                 # Advanced — streaming
-                streaming__segmentation=self.var_seg.get().strip(),
                 streaming__min_segment_sec=float(self.var_min_seg.get()),
-                streaming__min_silence_sec=float(self.var_min_sil.get()),
                 streaming__energy_threshold=float(self.var_energy.get()),
-                # Advanced — decoding
-                decoding__beam_size=int(self.var_beam.get()),
-                decoding__temperature=float(self.var_temp.get()),
                 # Advanced — output
                 output__primary_method=self.var_output_method.get().strip(),
                 output__prefer_clipboard_over_chars=int(self.var_prefer_clipboard.get()),

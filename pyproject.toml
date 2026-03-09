@@ -14,7 +14,7 @@ authors = [
 maintainers = [
     {name = "Josh", email = "josh@example.com"}
 ]
-keywords = ["speech-to-text", "whisper", "dictation", "accessibility", "voice-control"]
+keywords = ["speech-to-text", "canary", "nemo", "dictation", "accessibility", "voice-control"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: End Users/Desktop",
@@ -28,7 +28,10 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "faster-whisper>=0.10.0",
+    # NVIDIA NeMo — must install torch (CUDA) separately first:
+    #   pip install torch --index-url https://download.pytorch.org/whl/cu124
+    "nemo_toolkit[asr]>=2.0.0",
+    "soundfile>=0.12.1",
     "sounddevice>=0.4.6",
     "numpy>=1.24.0",
     "keyboard>=0.13.5",
@@ -50,27 +53,6 @@ dev = [
     "mypy>=1.5.0",
     "pre-commit>=3.3.3",
     "types-PyYAML>=6.0.0",
-]
-noise-reduction = [
-    "noisereduce>=3.0.0",
-    "webrtcvad>=2.0.10",
-]
-# V2: Silero VAD + Ollama brain layer
-# Install with: pip install "vype[v2]"
-# NOTE: torch MUST be installed separately before this extra, using the correct
-# CUDA wheel for your driver. Example for CUDA 12.4:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu124
-v2 = [
-    "onnxruntime-gpu>=1.17.0",
-]
-
-# Canary-Qwen (NVIDIA NeMo SpeechLM2) STT backend
-# Model: https://huggingface.co/nvidia/canary-qwen-2.5b
-# NOTE: torch must be installed separately (CUDA or CPU) before installing NeMo.
-canary = [
-    # Use the published NeMo releases instead of trunk git to avoid
-    # metadata versions like "dev" that some pip/packaging combos reject.
-    "nemo_toolkit[asr,tts]>=2.5.0",
 ]
 
 [project.urls]

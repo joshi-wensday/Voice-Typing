@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from .schema import AppConfig, CommandConfig
+from .schema import AppConfig
 
 
 class ConfigManager:
@@ -71,40 +71,6 @@ class ConfigManager:
             d[keys[-1]] = value
 
         self.config = AppConfig(**data)
-        self.save()
-
-    def add_custom_command(self, name: str, pattern: str, action: str, description: str = "") -> None:
-        """Add a custom voice command.
-
-        Args:
-            name: Command identifier
-            pattern: Regex pattern to match in transcription
-            action: Text to insert or action to perform
-            description: Human-readable description
-        """
-        self.config.commands.custom_commands[name] = CommandConfig(
-            enabled=True,
-            pattern=pattern,
-            action=action,
-            description=description,
-        )
-        self.save()
-
-    def toggle_command(self, command_path: str, enabled: bool) -> None:
-        """Enable/disable a specific command.
-
-        Args:
-            command_path: Dot-separated path (e.g., "punctuation.period", "commands.new_line")
-            enabled: Whether to enable the command
-        """
-        parts = command_path.split(".")
-        obj: Any = self.config
-
-        for part in parts[:-1]:
-            obj = getattr(obj, part)
-
-        command = getattr(obj, parts[-1])
-        command.enabled = enabled
         self.save()
 
     def reset_to_defaults(self) -> None:
