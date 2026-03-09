@@ -13,6 +13,7 @@ import numpy as np
 
 from vype.audio.capture import AudioCapture
 from vype.config.manager import ConfigManager
+from vype.stt.canary_engine import CanaryQwenEngine
 from vype.stt.whisper_engine import FasterWhisperEngine
 from vype.controller import VoiceTypingController
 from vype.ui.hotkey import HotkeyManager
@@ -53,12 +54,23 @@ def _run_cli(record_seconds: float) -> None:
     print(f"Captured {samples.shape[0]} samples @ {a_cfg.sample_rate} Hz")
 
     s_cfg = cfg.config.stt
-    stt = FasterWhisperEngine(
-        model=s_cfg.model,
-        device=s_cfg.device,
-        compute_type=s_cfg.compute_type,
-        language=s_cfg.language,
-    )
+    backend = getattr(s_cfg, "backend", "whisper")
+    # Use .value for robust comparison — str(StrEnum) changed behaviour in Python 3.11
+    backend_val = backend.value if hasattr(backend, "value") else str(backend)
+    model_val = s_cfg.model.value if hasattr(s_cfg.model, "value") else str(s_cfg.model)
+    if backend_val == "nemo" or model_val == "canary-qwen-2.5b":
+        stt = CanaryQwenEngine(
+            model="nvidia/canary-qwen-2.5b",
+            device=str(s_cfg.device.value if hasattr(s_cfg.device, "value") else s_cfg.device),
+            language=s_cfg.language,
+        )
+    else:
+        stt = FasterWhisperEngine(
+            model=s_cfg.model,
+            device=s_cfg.device,
+            compute_type=s_cfg.compute_type,
+            language=s_cfg.language,
+        )
     stt.preload()
 
     t0 = time.time()
@@ -120,13 +132,31 @@ def _run_app() -> None:
     # Tray (runs in its own thread); Exit will quit Tk
     tray = TrayApp(on_toggle=controller.toggle, on_exit=root.quit, on_settings=settings.show)
     tray.run()
-    
+
     # Connect status changes to both tray and overlay
     def on_status_change(status: str) -> None:
         tray.set_status(status)
         overlay.set_state(status)
-    
+
     controller.on_status_change = on_status_change
+
+    # ----------------------------------------------------------------
+    # Adaptive command learning — wire controller <-> overlay
+    # ----------------------------------------------------------------
+
+    def on_command_fired(phrase: str, tool: str) -> None:
+        """Show toast on main thread after any command fires (controller bg thread)."""
+        root.after(0, lambda: overlay.show_command_toast(phrase, tool))
+
+    def on_feedback_enter() -> None:
+        """Surface the correction dialog when 'that was wrong' voice cmd fires."""
+        root.after(0, overlay.show_correction_dialog_for_last)
+
+    controller.on_command_fired = on_command_fired
+    controller.on_feedback_enter = on_feedback_enter
+
+    # UI dialog saves corrections directly into the controller's learned store
+    overlay.on_correction_save = controller.apply_correction
 
     # Hotkey candidates: config first, then fallbacks (runs in bg threads)
     preferred = cfgm.config.ui.hotkey or "ctrl+alt+space"

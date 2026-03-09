@@ -7,10 +7,11 @@ from typing import Callable, Optional
 
 try:
     import pystray  # type: ignore
-    from PIL import Image  # type: ignore
+    from PIL import Image, ImageDraw  # type: ignore
 except Exception:  # pragma: no cover - not always present in CI
     pystray = None  # type: ignore
     Image = None  # type: ignore
+    ImageDraw = None  # type: ignore
 
 
 class TrayApp:
@@ -26,13 +27,31 @@ class TrayApp:
         return pystray is not None and Image is not None
 
     def _create_image(self, color: tuple[int, int, int]) -> Image.Image:  # type: ignore[name-defined]
+        """Draw a minimal waveform / audio-bars icon at 16×16.
+
+        Three vertical bars of increasing then decreasing height, centred on the
+        canvas, rendered in the status colour.  This is recognisable as a voice /
+        audio indicator at small sizes without needing any image assets.
+        """
         img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
-        for x in range(16):
-            for y in range(16):
-                dx = x - 8
-                dy = y - 8
-                if dx * dx + dy * dy <= 49:
-                    img.putpixel((x, y), (*color, 255))
+        draw = ImageDraw.Draw(img)
+        c = (*color, 255)
+
+        # Bar layout: (x_left, bar_height) for 5 bars spaced 2px apart
+        # Starting x = 1, each bar is 2px wide, 1px gap between them
+        bars = [
+            (1, 4),
+            (4, 8),
+            (7, 12),
+            (10, 8),
+            (13, 4),
+        ]
+        for bx, bh in bars:
+            # Centre each bar vertically in the 16px canvas
+            y_top = (16 - bh) // 2
+            y_bot = y_top + bh - 1
+            draw.rectangle([bx, y_top, bx + 1, y_bot], fill=c)
+
         return img
 
     def _color_for_status(self) -> tuple[int, int, int]:

@@ -55,6 +55,23 @@ noise-reduction = [
     "noisereduce>=3.0.0",
     "webrtcvad>=2.0.10",
 ]
+# V2: Silero VAD + Ollama brain layer
+# Install with: pip install "vype[v2]"
+# NOTE: torch MUST be installed separately before this extra, using the correct
+# CUDA wheel for your driver. Example for CUDA 12.4:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+v2 = [
+    "onnxruntime-gpu>=1.17.0",
+]
+
+# Canary-Qwen (NVIDIA NeMo SpeechLM2) STT backend
+# Model: https://huggingface.co/nvidia/canary-qwen-2.5b
+# NOTE: torch must be installed separately (CUDA or CPU) before installing NeMo.
+canary = [
+    # Use the published NeMo releases instead of trunk git to avoid
+    # metadata versions like "dev" that some pip/packaging combos reject.
+    "nemo_toolkit[asr,tts]>=2.5.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/yourusername/vype"

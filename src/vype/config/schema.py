@@ -10,13 +10,32 @@ from pydantic import BaseModel, Field
 
 
 class STTModel(str, Enum):
-    """Available Whisper models."""
+    """Available speech-to-text model presets.
+
+    Notes:
+    - Most values here refer to faster-whisper models.
+    - `canary-qwen-2.5b` uses NVIDIA NeMo (optional dependency) and ignores some
+      Whisper-specific decoding knobs.
+    """
 
     TINY = "tiny"
     BASE = "base"
     SMALL = "small"
     MEDIUM = "medium"
     LARGE = "large-v2"
+    LARGE_V3 = "large-v3"
+    CANARY_QWEN_2_5B = "canary-qwen-2.5b"
+
+
+class STTBackend(str, Enum):
+    """STT backend implementation.
+
+    - whisper: faster-whisper
+    - nemo: NVIDIA NeMo (SpeechLM2 / SALM)
+    """
+
+    WHISPER = "whisper"
+    NEMO = "nemo"
 
 
 class Device(str, Enum):
@@ -47,12 +66,28 @@ class CommandConfig(BaseModel):
 class STTConfig(BaseModel):
     """Speech-to-text engine configuration."""
 
-    model: STTModel = STTModel.BASE
-    device: Device = Device.AUTO
+    backend: STTBackend = STTBackend.WHISPER
+    model: STTModel = STTModel.LARGE_V3
+    device: Device = Device.CUDA
     language: str = "en"
-    compute_type: str = "float16"  # int8, float16, float32
-    remove_filler_words: bool = False  # Remove um, uh, etc.
-    improve_grammar: bool = False  # Context-aware grammar improvement
+    compute_type: str = "float16"  # float16: max quality (~3.1GB VRAM, recommended for RTX 3080+); int8_float16: lower VRAM; int8: CPU
+    remove_filler_words: bool = False  # handled by Refiner skill in V2
+    improve_grammar: bool = False  # handled by Refiner skill in V2
+
+
+class VADConfig(BaseModel):
+    """Voice Activity Detection configuration."""
+
+    enabled: bool = True
+    method: str = "silero"  # silero | energy
+    # Silero VAD thresholds
+    threshold: float = Field(0.4, ge=0.0, le=1.0)
+    min_speech_duration_ms: int = 250
+    min_silence_duration_ms: int = 800
+    max_segment_sec: float = 10.0
+    window_size_samples: int = 512
+    # Energy fallback threshold (used when method=energy)
+    energy_threshold: float = 0.015
 
 
 class AudioConfig(BaseModel):
@@ -61,9 +96,25 @@ class AudioConfig(BaseModel):
     device_id: int | None = None  # None = default device
     sample_rate: int = 16000
     channels: int = 1
-    chunk_duration: float = 0.5  # seconds
-    vad_enabled: bool = False
+    chunk_duration: float = 0.1  # smaller chunks for lower VAD latency
+    vad_enabled: bool = False  # legacy flag, superseded by VADConfig
     vad_aggressiveness: int = Field(2, ge=0, le=3)
+
+
+class BrainConfig(BaseModel):
+    """Ollama LLM brain configuration."""
+
+    enabled: bool = True
+    endpoint: str = "http://localhost:11434"
+    model: str = "llama3.2"
+    timeout_sec: float = 10.0
+    # Context summarizer window
+    context_window_sec: float = 120.0  # rolling 2-minute transcript window
+    context_max_keywords: int = 50
+    # Feature toggles
+    intent_routing_enabled: bool = True
+    refinement_enabled: bool = True
+    context_summarizer_enabled: bool = True
 
 
 def _default_punctuation_commands() -> dict[str, CommandConfig]:
@@ -162,10 +213,10 @@ class StreamingConfig(BaseModel):
     """Streaming/segmentation configuration."""
 
     mode: str = "final_only"  # final_only | semi_streaming (future)
-    segmentation: str = "energy"  # energy | vad (future)
-    min_segment_sec: float = 1.2
-    min_silence_sec: float = 0.6
-    energy_threshold: float = 0.015
+    segmentation: str = "vad"  # vad | energy
+    min_segment_sec: float = 0.5
+    min_silence_sec: float = 0.4
+    energy_threshold: float = 0.015  # fallback when segmentation=energy
 
 
 class DecodingConfig(BaseModel):
@@ -173,7 +224,25 @@ class DecodingConfig(BaseModel):
 
     beam_size: int = 5
     temperature: float = 0.0
-    condition_on_previous_text: bool = True
+    # Setting this to False is the primary fix for looping hallucinations; Whisper
+    # will not condition each new segment on its own previously generated tokens.
+    condition_on_previous_text: bool = False
+    # Segments whose average log-probability is below this are discarded.
+    # -1.0 accepts everything; -0.4 discards low-confidence segments.
+    log_prob_threshold: float = -0.4
+    # Segments with a gzip compression ratio above this are likely repetitive
+    # hallucinations and are discarded.
+    compression_ratio_threshold: float = 2.4
+    # Segments where Whisper's internal no-speech probability exceeds this
+    # threshold are discarded rather than transcribed.
+    no_speech_threshold: float = 0.6
+    # Beam search patience multiplier. 1.0 = stop as soon as beam_size finished
+    # beams are found. 2.0 = explore twice as many candidates before committing,
+    # improving accuracy at a modest compute cost.
+    patience: float = 2.0
+    # Penalises repeated tokens in the decoder output. Values slightly above 1.0
+    # discourage Whisper's tendency to repeat n-grams when audio is ambiguous.
+    repetition_penalty: float = 1.1
 
 
 class AppConfig(BaseModel):
@@ -181,6 +250,8 @@ class AppConfig(BaseModel):
 
     stt: STTConfig = Field(default_factory=STTConfig)
     audio: AudioConfig = Field(default_factory=AudioConfig)
+    vad: VADConfig = Field(default_factory=VADConfig)
+    brain: BrainConfig = Field(default_factory=BrainConfig)
     punctuation: PunctuationConfig = Field(default_factory=PunctuationConfig)
     commands: CommandsConfig = Field(default_factory=CommandsConfig)
     ui: UIConfig = Field(default_factory=UIConfig)

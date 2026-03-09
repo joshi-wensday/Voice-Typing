@@ -1,7 +1,9 @@
-"""Modern glassmorphism-styled settings window with smooth animations."""
+"""Modern settings window with sidebar navigation and card-based layout."""
 
 from __future__ import annotations
 
+import copy
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional, Callable, Any
@@ -11,13 +13,17 @@ from ..config.manager import ConfigManager
 from ..audio.capture import AudioCapture
 from ..stt.model_manager import ModelManager
 from ..stt.model_tester import ModelTester
-from .effects import ColorTheme, ease_out_sine, interpolate_color
+from .effects import ColorTheme, create_card_frame, ease_out_sine, interpolate_color
 from .hotkey_capture import HotkeyCapture
 
 
+# ---------------------------------------------------------------------------
+# Reusable widget components
+# ---------------------------------------------------------------------------
+
 class ModernButton(tk.Canvas):
     """Custom modern button with gradient and hover effects."""
-    
+
     def __init__(
         self,
         parent,
@@ -34,32 +40,23 @@ class ModernButton(tk.Canvas):
             bg=ColorTheme.BG_DARK,
             highlightthickness=0,
         )
-        
         self.text = text
         self.command = command
         self.width = width
         self.height = height
         self.primary = primary
-        
         self._is_hovering = False
         self._is_pressed = False
-        self._animation_progress = 0.0
-        
-        # Bind events
+
         self.bind('<Enter>', self._on_enter)
         self.bind('<Leave>', self._on_leave)
         self.bind('<Button-1>', self._on_press)
         self.bind('<ButtonRelease-1>', self._on_release)
-        
         self._draw()
-    
+
     def _draw(self):
-        """Draw the button."""
         self.delete('all')
-        
         w, h = self.width, self.height
-        
-        # Choose colors based on state
         if self.primary:
             if self._is_pressed:
                 bg_color = '#6366f1'
@@ -69,59 +66,40 @@ class ModernButton(tk.Canvas):
                 bg_color = '#7c3aed'
         else:
             if self._is_pressed:
-                bg_color = ColorTheme.BG_CARD
+                bg_color = ColorTheme.BG_CARD_RAISED
             elif self._is_hovering:
                 bg_color = ColorTheme.BORDER_LIGHT
             else:
                 bg_color = ColorTheme.BORDER
-        
-        # Draw rounded rectangle background
-        self._create_rounded_rect(2, 2, w-2, h-2, radius=8, fill=bg_color, outline='')
-        
-        # Draw text
-        text_color = ColorTheme.TEXT_PRIMARY
+        self._create_rounded_rect(2, 2, w - 2, h - 2, radius=8, fill=bg_color, outline='')
         self.create_text(
             w // 2, h // 2,
             text=self.text,
-            fill=text_color,
-            font=('Segoe UI', 10, 'normal')
+            fill=ColorTheme.TEXT_PRIMARY,
+            font=('Segoe UI', 10, 'normal'),
         )
-    
+
     def _create_rounded_rect(self, x1, y1, x2, y2, radius=10, **kwargs):
-        """Create a rounded rectangle."""
         points = [
-            x1+radius, y1,
-            x2-radius, y1,
-            x2, y1,
-            x2, y1+radius,
-            x2, y2-radius,
-            x2, y2,
-            x2-radius, y2,
-            x1+radius, y2,
-            x1, y2,
-            x1, y2-radius,
-            x1, y1+radius,
-            x1, y1
+            x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
+            x2, y2 - radius, x2, y2, x2 - radius, y2, x1 + radius, y2,
+            x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1,
         ]
         return self.create_polygon(points, smooth=True, **kwargs)
-    
-    def _on_enter(self, event):
-        """Handle mouse enter."""
+
+    def _on_enter(self, _e):
         self._is_hovering = True
         self._draw()
-    
-    def _on_leave(self, event):
-        """Handle mouse leave."""
+
+    def _on_leave(self, _e):
         self._is_hovering = False
         self._draw()
-    
-    def _on_press(self, event):
-        """Handle button press."""
+
+    def _on_press(self, _e):
         self._is_pressed = True
         self._draw()
-    
-    def _on_release(self, event):
-        """Handle button release."""
+
+    def _on_release(self, _e):
         self._is_pressed = False
         self._draw()
         if self._is_hovering and self.command:
@@ -130,23 +108,12 @@ class ModernButton(tk.Canvas):
 
 class ModernEntry(tk.Frame):
     """Custom modern entry field with rounded corners and styling."""
-    
+
     def __init__(self, parent, textvariable=None, width=30, **kwargs):
-        super().__init__(parent, bg=ColorTheme.BG_DARK)
-        
-        # Create canvas for rounded background
-        self.canvas = tk.Canvas(
-            self,
-            height=32,
-            bg=ColorTheme.BG_DARK,
-            highlightthickness=0,
-        )
+        super().__init__(parent, bg=ColorTheme.BG_CARD_RAISED)
+        self.canvas = tk.Canvas(self, height=32, bg=ColorTheme.BG_CARD_RAISED, highlightthickness=0)
         self.canvas.pack(fill=tk.X, expand=True)
-        
-        # Draw rounded background
         self._draw_background()
-        
-        # Create entry widget on top
         self.entry = tk.Entry(
             self.canvas,
             textvariable=textvariable,
@@ -156,1727 +123,1374 @@ class ModernEntry(tk.Frame):
             relief=tk.FLAT,
             font=('Segoe UI', 10),
             width=width,
-            **kwargs
+            **kwargs,
         )
-        
-        # Place entry in canvas
         self.canvas.create_window(4, 16, anchor=tk.W, window=self.entry)
-        
-        # Bind focus events for highlighting
-        self.entry.bind('<FocusIn>', lambda e: self._on_focus(True))
-        self.entry.bind('<FocusOut>', lambda e: self._on_focus(False))
-    
+        self.entry.bind('<FocusIn>', lambda _e: self._on_focus(True))
+        self.entry.bind('<FocusOut>', lambda _e: self._on_focus(False))
+
     def _draw_background(self, focused=False):
-        """Draw the rounded background."""
         self.canvas.delete('background')
-        
-        border_color = ColorTheme.ACCENT_PRIMARY if focused else ColorTheme.BORDER
-        
-        # Draw rounded rectangle
+        border_color = ColorTheme.ACCENT_PRIMARY if focused else ColorTheme.CARD_BORDER
         w = self.canvas.winfo_reqwidth() or 200
         self._create_rounded_rect(
             self.canvas, 0, 0, w, 32,
-            radius=6,
-            fill=ColorTheme.BG_CARD,
-            outline=border_color,
-            width=1,
-            tags='background'
+            radius=6, fill=ColorTheme.BG_CARD, outline=border_color,
+            width=1, tags='background',
         )
         self.canvas.tag_lower('background')
-    
+
     def _create_rounded_rect(self, canvas, x1, y1, x2, y2, radius=10, **kwargs):
-        """Create a rounded rectangle."""
         points = [
-            x1+radius, y1,
-            x2-radius, y1,
-            x2, y1,
-            x2, y1+radius,
-            x2, y2-radius,
-            x2, y2,
-            x2-radius, y2,
-            x1+radius, y2,
-            x1, y2,
-            x1, y2-radius,
-            x1, y1+radius,
-            x1, y1
+            x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
+            x2, y2 - radius, x2, y2, x2 - radius, y2, x1 + radius, y2,
+            x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1,
         ]
         return canvas.create_polygon(points, smooth=True, **kwargs)
-    
+
     def _on_focus(self, has_focus):
-        """Handle focus change."""
         self._draw_background(has_focus)
-    
+
     def get(self):
-        """Get entry value."""
         return self.entry.get()
 
 
 class ColorPicker(tk.Frame):
     """Simple color picker with preview and hex input."""
-    
+
     def __init__(self, parent, textvariable=None, width=20):
-        super().__init__(parent, bg=ColorTheme.BG_DARK)
-        
+        super().__init__(parent, bg=ColorTheme.BG_CARD_RAISED)
         self.textvariable = textvariable or tk.StringVar()
         self.width = width
-        
-        # Color preview box
         self.preview_canvas = tk.Canvas(
-            self,
-            width=32,
-            height=32,
+            self, width=32, height=32,
             bg=ColorTheme.BG_CARD,
             highlightthickness=1,
-            highlightbackground=ColorTheme.BORDER,
-            cursor='hand2'
+            highlightbackground=ColorTheme.CARD_BORDER,
+            cursor='hand2',
         )
         self.preview_canvas.pack(side=tk.LEFT, padx=(0, 8))
         self.preview_canvas.bind('<Button-1>', self._open_color_picker)
-        
-        # Hex input
-        self.entry = ModernEntry(
-            self,
-            textvariable=self.textvariable,
-            width=width
-        )
+        self.entry = ModernEntry(self, textvariable=self.textvariable, width=width)
         self.entry.pack(side=tk.LEFT)
-        
-        # Update preview when color changes
-        self.textvariable.trace_add('write', lambda *args: self._update_preview())
+        self.textvariable.trace_add('write', lambda *_: self._update_preview())
         self._update_preview()
-    
+
     def _update_preview(self):
-        """Update the color preview."""
         color = self.textvariable.get()
         try:
-            # Validate hex color
             if color.startswith('#') and len(color) == 7:
                 self.preview_canvas.configure(bg=color)
             else:
                 self.preview_canvas.configure(bg=ColorTheme.BG_CARD)
-        except:
+        except Exception:
             self.preview_canvas.configure(bg=ColorTheme.BG_CARD)
-    
-    def _open_color_picker(self, event=None):
-        """Open system color chooser dialog."""
+
+    def _open_color_picker(self, _event=None):
         from tkinter import colorchooser
-        
         current_color = self.textvariable.get()
-        
-        # Find the parent window (settings window) to set transient relationship
         parent_window = self.winfo_toplevel()
-        
-        # Temporarily disable topmost on settings window so color picker can appear above it
         was_topmost = False
         try:
             was_topmost = parent_window.attributes('-topmost')
             if was_topmost:
                 parent_window.attributes('-topmost', False)
-        except:
+        except Exception:
             pass
-        
-        # Open color chooser with current color
-        color = colorchooser.askcolor(
-            color=current_color, 
-            title="Choose Color",
-            parent=parent_window
-        )
-        
-        # Restore topmost state
+        color = colorchooser.askcolor(color=current_color, title="Choose Color", parent=parent_window)
         try:
             if was_topmost:
                 parent_window.attributes('-topmost', True)
-        except:
+        except Exception:
             pass
-        
-        if color and color[1]:  # color[1] is the hex value
+        if color and color[1]:
             self.textvariable.set(color[1])
-    
+
     def get(self):
-        """Get color value."""
         return self.textvariable.get()
 
 
 class ModernSlider(tk.Frame):
     """Custom modern slider with value display."""
-    
+
     def __init__(self, parent, variable=None, from_=0.0, to=1.0, resolution=0.01, width=200):
-        super().__init__(parent, bg=ColorTheme.BG_DARK)
-        
+        super().__init__(parent, bg=ColorTheme.BG_CARD_RAISED)
         self.variable = variable or tk.DoubleVar()
-        self.from_ = from_
-        self.to = to
-        self.resolution = resolution
-        
-        # Slider
         self.scale = tk.Scale(
             self,
-            from_=from_,
-            to=to,
-            resolution=resolution,
-            orient=tk.HORIZONTAL,
-            variable=self.variable,
-            bg=ColorTheme.BG_CARD,
-            fg=ColorTheme.TEXT_PRIMARY,
-            troughcolor=ColorTheme.BORDER,
-            highlightthickness=0,
-            length=width,
-            width=20,
-            sliderrelief=tk.FLAT,
-            activebackground=ColorTheme.ACCENT_PRIMARY
+            from_=from_, to=to, resolution=resolution,
+            orient=tk.HORIZONTAL, variable=self.variable,
+            bg=ColorTheme.BG_CARD_RAISED, fg=ColorTheme.TEXT_PRIMARY,
+            troughcolor=ColorTheme.BORDER, highlightthickness=0,
+            length=width, width=18, sliderrelief=tk.FLAT,
+            activebackground=ColorTheme.ACCENT_PRIMARY,
         )
         self.scale.pack(side=tk.LEFT, padx=(0, 10))
-        
-        # Value label
-        self.value_label = tk.Label(
-            self,
-            textvariable=self.variable,
-            bg=ColorTheme.BG_DARK,
-            fg=ColorTheme.TEXT_SECONDARY,
-            font=('Segoe UI', 9),
-            width=6
-        )
-        self.value_label.pack(side=tk.LEFT)
-    
+        tk.Label(
+            self, textvariable=self.variable,
+            bg=ColorTheme.BG_CARD_RAISED, fg=ColorTheme.TEXT_SECONDARY,
+            font=('Segoe UI', 9), width=6,
+        ).pack(side=tk.LEFT)
+
     def get(self):
-        """Get slider value."""
         return self.variable.get()
 
 
-class ModernDropdown(tk.Frame):
-    """Custom modern dropdown with styled list."""
-    
-    def __init__(self, parent, textvariable=None, values=None, width=30):
-        super().__init__(parent, bg=ColorTheme.BG_DARK)
-        
-        self.textvariable = textvariable or tk.StringVar()
-        self.values = values or []
-        self.width = width
-        self._is_open = False
-        self._dropdown_window = None
-        
-        # Main button/display with explicit width
-        canvas_width = self.width * 8  # Calculate pixel width from character width
-        self.button_canvas = tk.Canvas(
-            self,
-            height=32,
-            width=canvas_width,
-            bg=ColorTheme.BG_DARK,
-            highlightthickness=0,
-        )
-        self.button_canvas.pack(fill=tk.X, expand=True)
-        
-        # Draw the dropdown button
-        self._draw_button()
-        
-        # Bind click to toggle dropdown
-        self.button_canvas.bind('<Button-1>', self._toggle_dropdown)
-        
-        # Update display when variable changes
-        self.textvariable.trace_add('write', lambda *args: self._draw_button())
-    
-    def _draw_button(self, hovering=False):
-        """Draw the dropdown button."""
-        self.button_canvas.delete('all')
-        
-        # Use explicit width calculation
-        w = self.width * 8
-        h = 32
-        
-        # Background color
-        bg_color = ColorTheme.BORDER_LIGHT if hovering else ColorTheme.BG_CARD
-        border_color = ColorTheme.ACCENT_PRIMARY if hovering else ColorTheme.BORDER
-        
-        # Draw rounded rectangle background
-        self._create_rounded_rect(
-            self.button_canvas, 0, 0, w, h,
-            radius=6,
-            fill=bg_color,
-            outline=border_color,
-            width=1,
-            tags='background'
-        )
-        
-        # Draw text
-        text = self.textvariable.get() or ''
-        self.button_canvas.create_text(
-            10, h // 2,
-            text=text,
-            fill=ColorTheme.TEXT_PRIMARY,
-            font=('Segoe UI', 10),
-            anchor=tk.W,
-            tags='text'
-        )
-        
-        # Draw arrow
-        arrow_x = w - 20
-        arrow_y = h // 2
-        arrow_points = [
-            arrow_x - 4, arrow_y - 2,
-            arrow_x, arrow_y + 2,
-            arrow_x + 4, arrow_y - 2
-        ]
-        self.button_canvas.create_polygon(
-            arrow_points,
-            fill=ColorTheme.TEXT_SECONDARY,
-            outline='',
-            tags='arrow'
-        )
-    
-    def _create_rounded_rect(self, canvas, x1, y1, x2, y2, radius=10, **kwargs):
-        """Create a rounded rectangle."""
-        points = [
-            x1+radius, y1,
-            x2-radius, y1,
-            x2, y1,
-            x2, y1+radius,
-            x2, y2-radius,
-            x2, y2,
-            x2-radius, y2,
-            x1+radius, y2,
-            x1, y2,
-            x1, y2-radius,
-            x1, y1+radius,
-            x1, y1
-        ]
-        return canvas.create_polygon(points, smooth=True, **kwargs)
-    
-    def _toggle_dropdown(self, event=None):
-        """Toggle the dropdown list."""
-        print(f"[DROPDOWN] Toggle called - currently open: {self._is_open}")
-        if self._is_open:
-            self._close_dropdown()
-        else:
-            self._open_dropdown()
-    
-    def _open_dropdown(self):
-        """Open the dropdown list."""
-        print(f"[DROPDOWN] _open_dropdown called - is_open={self._is_open}, values={len(self.values)}")
-        if self._is_open or not self.values:
-            print(f"[DROPDOWN] Aborting open - is_open={self._is_open}, has_values={len(self.values) > 0}")
-            return
-        
-        self._is_open = True
-        
-        # Ensure widget is updated before getting position
-        self.button_canvas.update_idletasks()
-        
-        # Create toplevel window for dropdown
-        self._dropdown_window = tk.Toplevel(self)
-        self._dropdown_window.overrideredirect(True)
-        self._dropdown_window.attributes('-topmost', True)
-        self._dropdown_window.configure(bg=ColorTheme.BG_CARD)
-        
-        # Position below the button - use explicit width
-        x = self.button_canvas.winfo_rootx()
-        y = self.button_canvas.winfo_rooty() + self.button_canvas.winfo_height()
-        w = self.width * 8  # Use explicit width calculation
-        
-        print(f"[DROPDOWN] Positioning at x={x}, y={y}, width={w}")
-        
-        # Create scrollable frame for dropdown
-        container_frame = tk.Frame(
-            self._dropdown_window,
-            bg=ColorTheme.BG_CARD
-        )
-        container_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Create a simple container for items (no canvas, direct packing)
-        # Calculate height based on number of items (max 6 visible at once)
-        max_visible_items = 6
-        item_height = 32
-        num_items = len(self.values)
-        dropdown_height = min(num_items * item_height, max_visible_items * item_height)
-        
-        # Add items directly to container
-        for i, value in enumerate(self.values):
-            if i >= max_visible_items:
-                break  # Limit visible items for now (TODO: add scrollbar if needed)
-            
-            item_frame = tk.Frame(container_frame, bg=ColorTheme.BG_CARD, height=item_height)
-            item_frame.pack(fill=tk.X)
-            item_frame.pack_propagate(False)
-            
-            label = tk.Label(
-                item_frame,
-                text=str(value),
-                bg=ColorTheme.BG_CARD,
-                fg=ColorTheme.TEXT_PRIMARY,
-                font=('Segoe UI', 10),
-                anchor=tk.W,
-                padx=10
-            )
-            label.pack(fill=tk.BOTH, expand=True)
-            
-            # Bind hover and click
-            item_frame.bind('<Enter>', lambda e, f=item_frame, l=label: self._on_item_hover(f, l, True))
-            item_frame.bind('<Leave>', lambda e, f=item_frame, l=label: self._on_item_hover(f, l, False))
-            label.bind('<Enter>', lambda e, f=item_frame, l=label: self._on_item_hover(f, l, True))
-            label.bind('<Leave>', lambda e, f=item_frame, l=label: self._on_item_hover(f, l, False))
-            
-            item_frame.bind('<Button-1>', lambda e, v=value: self._on_select(v))
-            label.bind('<Button-1>', lambda e, v=value: self._on_select(v))
-        
-        # Update to ensure proper sizing
-        container_frame.update_idletasks()
-        
-        geometry_str = f"{w}x{dropdown_height}+{x}+{y}"
-        print(f"[DROPDOWN] Setting geometry: {geometry_str}")
-        self._dropdown_window.geometry(geometry_str)
-        
-        # Make sure dropdown is visible
-        self._dropdown_window.deiconify()
-        self._dropdown_window.lift()
-        
-        # Bind click outside to close
-        self._dropdown_window.bind('<FocusOut>', lambda e: self._close_dropdown())
-        self._dropdown_window.focus_set()
-        print("[DROPDOWN] Dropdown window created and shown")
-    
-    def _on_item_hover(self, frame, label, entering):
-        """Handle item hover."""
-        if entering:
-            frame.configure(bg=ColorTheme.BORDER_LIGHT)
-            label.configure(bg=ColorTheme.BORDER_LIGHT)
-        else:
-            frame.configure(bg=ColorTheme.BG_CARD)
-            label.configure(bg=ColorTheme.BG_CARD)
-    
-    def _on_select(self, value):
-        """Handle item selection."""
-        self.textvariable.set(str(value))
-        self._close_dropdown()
-    
-    def _close_dropdown(self):
-        """Close the dropdown list."""
-        if not self._is_open:
-            return
-        
-        self._is_open = False
-        if self._dropdown_window:
-            self._dropdown_window.destroy()
-            self._dropdown_window = None
-    
-    def get(self):
-        """Get selected value."""
-        return self.textvariable.get()
-    
-    def set(self, value):
-        """Set selected value."""
-        self.textvariable.set(str(value))
+# ---------------------------------------------------------------------------
+# SettingsWindow — sidebar + card layout
+# ---------------------------------------------------------------------------
 
-
-class ModernTitleBar(tk.Canvas):
-    """Custom modern title bar with close/minimize buttons."""
-    
-    def __init__(self, parent, title: str, on_close=None, on_minimize=None):
-        super().__init__(
-            parent,
-            height=40,
-            bg=ColorTheme.BG_DARKER,
-            highlightthickness=0,
-        )
-        
-        self.title = title
-        self.on_close = on_close
-        self.on_minimize = on_minimize
-        self.parent_window = parent
-        
-        # Drag state
-        self._drag_start_x = 0
-        self._drag_start_y = 0
-        self._window_start_x = 0
-        self._window_start_y = 0
-        self._is_dragging = False
-        
-        # Button states
-        self._close_hover = False
-        self._minimize_hover = False
-        
-        # Bind events for dragging and clicking
-        self.bind('<ButtonPress-1>', self._on_button_press)
-        self.bind('<B1-Motion>', self._on_drag)
-        self.bind('<ButtonRelease-1>', self._on_button_release)
-        self.bind('<Motion>', self._on_motion)
-        self.bind('<Leave>', self._on_leave)
-        
-        self.pack(fill=tk.X)
-        self._draw()
-    
-    def _draw(self):
-        """Draw the title bar."""
-        self.delete('all')
-        
-        width = self.winfo_width() or 640
-        height = 40
-        
-        # Background
-        self.create_rectangle(0, 0, width, height, fill=ColorTheme.BG_DARKER, outline='')
-        
-        # Title text
-        self.create_text(
-            16, height // 2,
-            text=self.title,
-            fill=ColorTheme.TEXT_PRIMARY,
-            font=('Segoe UI', 11, 'bold'),
-            anchor=tk.W
-        )
-        
-        # Close button (X)
-        close_x = width - 20
-        close_y = height // 2
-        close_color = '#ef4444' if self._close_hover else ColorTheme.TEXT_SECONDARY
-        
-        self.create_text(
-            close_x, close_y,
-            text='×',
-            fill=close_color,
-            font=('Segoe UI', 20, 'bold'),
-            tags='close_btn'
-        )
-        
-        # Minimize button (–)
-        minimize_x = width - 50
-        minimize_y = height // 2
-        minimize_color = ColorTheme.TEXT_PRIMARY if self._minimize_hover else ColorTheme.TEXT_SECONDARY
-        
-        self.create_text(
-            minimize_x, minimize_y,
-            text='─',
-            fill=minimize_color,
-            font=('Segoe UI', 12, 'bold'),
-            tags='minimize_btn'
-        )
-    
-    def _on_button_press(self, event):
-        """Handle button press - start drag or prepare for button click."""
-        print(f"[DRAG] _on_button_press called - event.x={event.x}, event.y={event.y}")
-        
-        # Check if clicking on buttons
-        width = self.winfo_width() or 640
-        close_x = width - 20
-        minimize_x = width - 50
-        
-        print(f"[DRAG] Width={width}, close_x={close_x}, minimize_x={minimize_x}")
-        
-        # If clicking on close or minimize buttons, don't start drag (handle in release)
-        if (abs(event.x - close_x) < 15 and abs(event.y - 20) < 15) or \
-           (abs(event.x - minimize_x) < 15 and abs(event.y - 20) < 15):
-            print("[DRAG] Click on button detected - not starting drag")
-            self._is_dragging = False
-            return
-        
-        # Start dragging - store absolute screen coordinates and initial window position
-        self._drag_start_x = event.x_root
-        self._drag_start_y = event.y_root
-        try:
-            self._window_start_x = self.parent_window.winfo_x()
-            self._window_start_y = self.parent_window.winfo_y()
-            self._is_dragging = True
-            print(f"[DRAG] Drag started - root=({event.x_root},{event.y_root}), window=({self._window_start_x},{self._window_start_y})")
-        except Exception as e:
-            print(f"[DRAG] Error getting window position: {e}")
-            self._window_start_x = 0
-            self._window_start_y = 0
-            self._is_dragging = False
-    
-    def _on_drag(self, event):
-        """Drag the window."""
-        # Only drag if we're in dragging mode
-        if not self._is_dragging:
-            return
-            
-        try:
-            # Calculate movement using absolute screen coordinates
-            dx = event.x_root - self._drag_start_x
-            dy = event.y_root - self._drag_start_y
-            
-            # Apply to initial window position
-            x = self._window_start_x + dx
-            y = self._window_start_y + dy
-            print(f"[DRAG] Moving window to ({x},{y}) - delta=({dx},{dy})")
-            self.parent_window.geometry(f"+{x}+{y}")
-        except Exception as e:
-            print(f"[DRAG] Error during drag: {e}")
-    
-    def _on_button_release(self, event):
-        """Handle button release - end drag or execute button click."""
-        print(f"[DRAG] _on_button_release called - is_dragging was {self._is_dragging}")
-        
-        # If we were dragging, just end the drag
-        if self._is_dragging:
-            self._is_dragging = False
-            print("[DRAG] Drag ended")
-            return
-        
-        # Not dragging - check if clicking on buttons
-        width = self.winfo_width() or 640
-        close_x = width - 20
-        minimize_x = width - 50
-        
-        # Close button
-        if abs(event.x - close_x) < 15 and abs(event.y - 20) < 15:
-            print("[DRAG] Close button clicked")
-            if self.on_close:
-                self.on_close()
-            return
-        
-        # Minimize button
-        if abs(event.x - minimize_x) < 15 and abs(event.y - 20) < 15:
-            print("[DRAG] Minimize button clicked")
-            if self.on_minimize:
-                self.on_minimize()
-            return
-    
-    def _on_motion(self, event):
-        """Handle mouse motion for button hover effects."""
-        width = self.winfo_width() or 640
-        
-        # Check if over close button
-        close_x = width - 20
-        if abs(event.x - close_x) < 15 and abs(event.y - 20) < 15:
-            if not self._close_hover:
-                self._close_hover = True
-                self._draw()
-        elif self._close_hover:
-            self._close_hover = False
-            self._draw()
-        
-        # Check if over minimize button
-        minimize_x = width - 50
-        if abs(event.x - minimize_x) < 15 and abs(event.y - 20) < 15:
-            if not self._minimize_hover:
-                self._minimize_hover = True
-                self._draw()
-        elif self._minimize_hover:
-            self._minimize_hover = False
-            self._draw()
-    
-    def _on_leave(self, event):
-        """Reset hover states when mouse leaves."""
-        if self._close_hover or self._minimize_hover:
-            self._close_hover = False
-            self._minimize_hover = False
-            self._draw()
-    
 class SettingsWindow:
-    """Modern glassmorphism-styled settings window.
-    
-    Features:
-    - Dark mode with semi-transparent background
-    - Custom modern title bar with draggable interface
-    - Custom-styled widgets with hover effects
-    - Smooth tab transitions
-    - Gradient accents matching the overlay
-    - Success animations on save
+    """Settings window with sidebar navigation and card-based panel layout.
+
+    Layout (780×660):
+        ┌──────────────────────────────────────┐
+        │ Sidebar (180) │ Content area (580)   │
+        │               │  [scrollable cards]  │
+        ├───────────────┴──────────────────────┤
+        │  Footer: status badge  [Reset] [Save]│
+        └──────────────────────────────────────┘
     """
-    
+
+    _NAV_ITEMS = [
+        ("🎙", "General"),
+        ("🔊", "Speech"),
+        ("🎚", "Audio"),
+        ("⌨", "Commands"),
+        ("🧠", "Brain / AI"),
+        ("🎨", "Appearance"),
+        ("⚙", "Advanced"),
+        ("📦", "Models"),
+    ]
+
     def __init__(self, cfgm: ConfigManager, root: Optional[tk.Tk] = None) -> None:
         self.cfgm = cfgm
         self.root: Optional[tk.Tk] = root
         self.win: Optional[tk.Toplevel] = None
-        
-        # Animation state
+
         self._fade_alpha = 0.0
-        self._current_tab_index = 0
-        self._title_bar: Optional[ModernTitleBar] = None
-        
-        # Model management
+        self._active_panel: int = 0
+        self._panels: dict[str, tk.Frame] = {}
+        self._nav_buttons: list[tk.Canvas] = []
+
         self.model_manager = ModelManager()
         self.model_tester = ModelTester()
-        
-        # Config snapshot for cancel functionality
         self._original_config = None
-        
+
+        # Footer status label (created in _build_footer)
+        self._status_label: Optional[tk.Label] = None
+        self._status_after_id: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Window-level helpers
+    # ------------------------------------------------------------------
+
+    def _apply_dark_titlebar(self) -> None:
+        try:
+            import ctypes
+            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            self.win.update()
+            hwnd = ctypes.windll.user32.GetParent(self.win.winfo_id())
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int),
+            )
+        except Exception:
+            pass
+
     def _setup_modern_style(self) -> None:
-        """Setup modern ttk style theme."""
         style = ttk.Style()
-        
-        # Configure Notebook (tabs)
         style.theme_use('clam')
-        
-        style.configure(
-            'Modern.TNotebook',
-            background=ColorTheme.BG_DARK,
-            borderwidth=0,
-            tabmargins=[10, 10, 0, 0]
-        )
-        
-        style.configure(
-            'Modern.TNotebook.Tab',
-            background=ColorTheme.BG_CARD,
-            foreground=ColorTheme.TEXT_SECONDARY,
-            padding=[16, 12],  # Reasonable padding - width controlled by spaces in text
-            borderwidth=0,
-            font=('Segoe UI', 10)
-        )
-        
-        style.map(
-            'Modern.TNotebook.Tab',
-            background=[('selected', ColorTheme.ACCENT_PRIMARY)],
-            foreground=[('selected', ColorTheme.TEXT_PRIMARY)],
-            padding=[('selected', [16, 12])]  # Same padding for selected state
-            # Removed expand parameter that was causing size changes
-        )
-        
-        # Configure Frame
-        style.configure(
-            'Modern.TFrame',
-            background=ColorTheme.BG_DARK
-        )
-        
-        # Configure custom scrollbar
+        style.configure('Modern.TFrame', background=ColorTheme.BG_DARK)
         style.configure(
             'Modern.Vertical.TScrollbar',
             background=ColorTheme.BG_CARD,
             troughcolor=ColorTheme.BG_DARKER,
-            borderwidth=0,
-            arrowsize=12,
-            width=12
+            borderwidth=0, arrowsize=12, width=10,
         )
-        
         style.map(
             'Modern.Vertical.TScrollbar',
-            background=[('active', ColorTheme.ACCENT_PRIMARY), ('!active', ColorTheme.BG_CARD)]
+            background=[('active', ColorTheme.ACCENT_PRIMARY), ('!active', ColorTheme.BG_CARD)],
         )
-        
-        # Configure Label
-        style.configure(
-            'Modern.TLabel',
-            background=ColorTheme.BG_DARK,
-            foreground=ColorTheme.TEXT_PRIMARY,
-            font=('Segoe UI', 10)
-        )
-        
-        style.configure(
-            'Title.TLabel',
-            background=ColorTheme.BG_DARK,
-            foreground=ColorTheme.TEXT_PRIMARY,
-            font=('Segoe UI', 12, 'bold')
-        )
-        
-        # Configure Combobox
         style.configure(
             'Modern.TCombobox',
             fieldbackground=ColorTheme.BG_CARD,
             background=ColorTheme.BG_CARD,
             foreground=ColorTheme.TEXT_PRIMARY,
             arrowcolor=ColorTheme.TEXT_PRIMARY,
-            borderwidth=1,
-            relief=tk.FLAT
+            borderwidth=1, relief=tk.FLAT,
         )
-        
-        # Configure Checkbutton
         style.configure(
             'Modern.TCheckbutton',
-            background=ColorTheme.BG_DARK,
+            background=ColorTheme.BG_CARD_RAISED,
             foreground=ColorTheme.TEXT_PRIMARY,
-            font=('Segoe UI', 10)
+            font=('Segoe UI', 10),
         )
         style.map(
             'Modern.TCheckbutton',
-            background=[('active', ColorTheme.BG_DARK)],
-            foreground=[('active', ColorTheme.ACCENT_PRIMARY)]
+            background=[('active', ColorTheme.BG_CARD_RAISED)],
+            foreground=[('active', ColorTheme.ACCENT_PRIMARY)],
         )
 
-    def _create_section_header(self, parent, text: str) -> ttk.Label:
-        """Create a section header label."""
-        return ttk.Label(
-            parent,
-            text=text,
-            style='Title.TLabel'
-        )
-
-    def _create_labeled_field(
-        self,
-        parent,
-        label_text: str,
-        widget_class,
-        row: int,
-        **widget_kwargs
-    ) -> Any:
-        """Create a labeled field (label + widget) in a grid.
-        
-        Args:
-            parent: Parent widget
-            label_text: Text for the label
-            widget_class: Widget class to instantiate
-            row: Grid row
-            **widget_kwargs: Additional arguments for widget
-        
-        Returns:
-            The created widget
-        """
-        # Label
-        label = ttk.Label(
-            parent,
-            text=label_text,
-            style='Modern.TLabel'
-        )
-        label.grid(row=row, column=0, sticky='w', padx=16, pady=8)
-        
-        # Widget
-        widget = widget_class(parent, **widget_kwargs)
-        widget.grid(row=row, column=1, sticky='w', padx=16, pady=8)
-        
-        return widget
+    # ------------------------------------------------------------------
+    # Build
+    # ------------------------------------------------------------------
 
     def _build(self) -> None:
-        """Build the modern settings UI."""
         assert self.win is not None
-        print("[SettingsWindow] Building modern settings UI")
-        
-        # Remove default window decorations
-        self.win.overrideredirect(True)
-        self.win.geometry("640x600+200+200")  # Increased height to ensure buttons aren't cut off
-        
-        # Set window background
+
+        self.win.title("Vype Settings")
+        self.win.geometry("780x660+200+150")
         self.win.configure(bg=ColorTheme.BG_DARK)
-        
-        # Try to set transparency (may not work on all systems)
+        self.win.resizable(False, False)
+
         try:
-            opacity = self.cfgm.config.ui.settings_window_opacity
-            self.win.attributes('-alpha', opacity)
-        except:
+            self.win.attributes('-alpha', self.cfgm.config.ui.settings_window_opacity)
+        except Exception:
             pass
-        
-        # Setup modern styles
+
+        self._apply_dark_titlebar()
         self._setup_modern_style()
-        
-        # Custom title bar
-        self._title_bar = ModernTitleBar(
-            self.win,
-            title="⚙ Vype Settings",
-            on_close=self._cancel,
-            on_minimize=self._minimize_window
+
+        # ── Outer shell: sidebar + content stacked above footer ──────────
+        outer = tk.Frame(self.win, bg=ColorTheme.BG_DARK)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        # Sidebar (fixed 180px)
+        self._sidebar_frame = tk.Frame(outer, bg=ColorTheme.BG_SIDEBAR, width=180)
+        self._sidebar_frame.pack(side=tk.LEFT, fill=tk.Y)
+        self._sidebar_frame.pack_propagate(False)
+        self._build_sidebar()
+
+        # Thin separator between sidebar and content
+        tk.Frame(outer, bg=ColorTheme.BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y)
+
+        # Content area
+        content_outer = tk.Frame(outer, bg=ColorTheme.BG_DARK)
+        content_outer.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._content_canvas = tk.Canvas(
+            content_outer, bg=ColorTheme.BG_DARK, highlightthickness=0,
         )
-        
-        # Note: Click events already bound in ModernTitleBar.__init__()
-        # The title bar handles both dragging and button clicks internally
-        
-        # Main container
-        main_container = ttk.Frame(self.win, style='Modern.TFrame')
-        main_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
-        
-        # Notebook (tabs)
-        self.notebook = ttk.Notebook(main_container, style='Modern.TNotebook')
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-        
-        # Create tabs
-        self._create_general_tab()
-        self._create_audio_tab()
-        self._create_streaming_tab()
-        self._create_decoding_tab()
-        self._create_appearance_tab()
-        self._create_models_tab()
-        
-        # Button container with extra bottom padding to prevent cutoff
-        button_frame = ttk.Frame(main_container, style='Modern.TFrame')
-        button_frame.pack(fill=tk.X, padx=20, pady=(10, 25))  # Extra bottom padding
-        
-        # Add buttons (right-aligned)
-        close_btn = ModernButton(
-            button_frame,
-            text="Close",
-            command=self.win.destroy,
-            width=100,
-            height=36
+        scrollbar = ttk.Scrollbar(
+            content_outer, orient="vertical",
+            command=self._content_canvas.yview,
+            style='Modern.Vertical.TScrollbar',
         )
-        close_btn.pack(side=tk.RIGHT, padx=5)
-        
-        save_btn = ModernButton(
-            button_frame,
-            text="Save",
-            command=self._save,
-            width=100,
-            height=36,
-            primary=True
-        )
-        save_btn.pack(side=tk.RIGHT, padx=5)
-        
-        # Fade-in animation
+        self._content_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self._content_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._content_frame = tk.Frame(self._content_canvas, bg=ColorTheme.BG_DARK)
+        self._content_canvas.create_window((0, 0), window=self._content_frame, anchor="nw")
+
+        self._content_frame.bind("<Configure>", self._on_content_configure)
+        self._content_canvas.bind("<Configure>", self._on_canvas_configure)
+        self._content_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        # ── Footer (full width, below the sidebar+content pair) ──────────
+        self._build_footer()
+
+        # Build all panels (hidden initially)
+        self._build_panels()
+
+        # Show first panel
+        self._show_panel(0)
+
         self._animate_fade_in()
 
-    def _create_general_tab(self) -> None:
-        """Create the General settings tab."""
-        frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(frame, text="General          ")
-        
-        # Configure grid
-        frame.columnconfigure(1, weight=1)
-        
-        # Hotkey
-        self.var_hotkey = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.ui.hotkey
+    # ------------------------------------------------------------------
+    # Scroll helpers
+    # ------------------------------------------------------------------
+
+    def _on_content_configure(self, _e) -> None:
+        self._content_canvas.configure(scrollregion=self._content_canvas.bbox("all"))
+
+    def _on_canvas_configure(self, e) -> None:
+        self._content_canvas.itemconfig(
+            self._content_canvas.find_all()[0] if self._content_canvas.find_all() else 1,
+            width=e.width,
         )
-        self._hotkey_entry = self._create_labeled_field(
-            frame,
-            "Hotkey",
-            lambda p, **kw: HotkeyCapture(p, **kw),
-            row=0,
-            textvariable=self.var_hotkey,
-            width=30
+
+    def _on_mousewheel(self, e) -> None:
+        if self.win and self.win.winfo_exists():
+            self._content_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+    # ------------------------------------------------------------------
+    # Sidebar
+    # ------------------------------------------------------------------
+
+    def _build_sidebar(self) -> None:
+        # Logo / app name header
+        header = tk.Frame(self._sidebar_frame, bg=ColorTheme.BG_SIDEBAR, height=64)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        tk.Label(
+            header, text="Vype", bg=ColorTheme.BG_SIDEBAR,
+            fg=ColorTheme.TEXT_PRIMARY, font=("Segoe UI", 14, "bold"),
+        ).place(x=20, y=20)
+        tk.Label(
+            header, text="Settings", bg=ColorTheme.BG_SIDEBAR,
+            fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 9),
+        ).place(x=20, y=42)
+
+        # Divider
+        tk.Frame(self._sidebar_frame, bg=ColorTheme.BORDER, height=1).pack(fill=tk.X)
+
+        # Nav items
+        self._nav_buttons = []
+        for idx, (icon, label) in enumerate(self._NAV_ITEMS):
+            btn = self._make_nav_item(self._sidebar_frame, icon, label, idx)
+            btn.pack(fill=tk.X)
+            self._nav_buttons.append(btn)
+
+    def _make_nav_item(self, parent, icon: str, label: str, idx: int) -> tk.Canvas:
+        item = tk.Canvas(
+            parent, bg=ColorTheme.BG_SIDEBAR, height=46,
+            highlightthickness=0, cursor="hand2",
         )
-        
-        # Model
-        self.var_model = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.stt.model
+
+        def _redraw(active: bool = False, hover: bool = False) -> None:
+            item.delete("all")
+            w = 180
+            if active:
+                item.create_rectangle(0, 0, 4, 46, fill=ColorTheme.ACTIVE_NAV, outline="")
+                item.create_rectangle(4, 0, w, 46, fill="#1d2b3f", outline="")
+                icon_fill = ColorTheme.ACCENT_PRIMARY
+                text_fill = ColorTheme.TEXT_PRIMARY
+            elif hover:
+                item.create_rectangle(0, 0, w, 46, fill="#182030", outline="")
+                icon_fill = ColorTheme.TEXT_SECONDARY
+                text_fill = ColorTheme.TEXT_PRIMARY
+            else:
+                icon_fill = ColorTheme.TEXT_DISABLED
+                text_fill = ColorTheme.TEXT_SECONDARY
+            item.create_text(20, 23, text=icon, fill=icon_fill,
+                             font=("Segoe UI", 13), anchor="w")
+            item.create_text(46, 23, text=label, fill=text_fill,
+                             font=("Segoe UI", 10), anchor="w")
+
+        _redraw(active=(idx == 0))
+        item._redraw = _redraw  # type: ignore[attr-defined]
+
+        def _enter(_e) -> None:
+            if idx != self._active_panel:
+                _redraw(hover=True)
+
+        def _leave(_e) -> None:
+            if idx != self._active_panel:
+                _redraw()
+
+        def _click(_e) -> None:
+            self._show_panel(idx)
+
+        item.bind("<Enter>", _enter)
+        item.bind("<Leave>", _leave)
+        item.bind("<Button-1>", _click)
+        return item
+
+    def _show_panel(self, idx: int) -> None:
+        self._active_panel = idx
+        for i, btn in enumerate(self._nav_buttons):
+            btn._redraw(active=(i == idx))  # type: ignore[attr-defined]
+        for frame in self._panels.values():
+            frame.pack_forget()
+        name = self._NAV_ITEMS[idx][1]
+        if name in self._panels:
+            self._panels[name].pack(fill=tk.BOTH, expand=True)
+        self._content_canvas.yview_moveto(0)
+
+    # ------------------------------------------------------------------
+    # Panel bootstrap
+    # ------------------------------------------------------------------
+
+    def _build_panels(self) -> None:
+        for _, name in self._NAV_ITEMS:
+            panel = tk.Frame(self._content_frame, bg=ColorTheme.BG_DARK)
+            self._panels[name] = panel
+
+        self._build_general_panel(self._panels["General"])
+        self._build_speech_panel(self._panels["Speech"])
+        self._build_audio_panel(self._panels["Audio"])
+        self._build_commands_panel(self._panels["Commands"])
+        self._build_brain_panel(self._panels["Brain / AI"])
+        self._build_appearance_panel(self._panels["Appearance"])
+        self._build_advanced_panel(self._panels["Advanced"])
+        self._build_models_panel(self._panels["Models"])
+
+    # ------------------------------------------------------------------
+    # Card / row helpers
+    # ------------------------------------------------------------------
+
+    def _panel_header(self, parent: tk.Frame, title: str, subtitle: str = "") -> None:
+        """Render a panel title + optional subtitle at the top."""
+        hdr = tk.Frame(parent, bg=ColorTheme.BG_DARK)
+        hdr.pack(fill=tk.X, padx=20, pady=(18, 4))
+        tk.Label(
+            hdr, text=title, bg=ColorTheme.BG_DARK,
+            fg=ColorTheme.TEXT_PRIMARY, font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w")
+        if subtitle:
+            tk.Label(
+                hdr, text=subtitle, bg=ColorTheme.BG_DARK,
+                fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 9),
+            ).pack(anchor="w", pady=(2, 0))
+
+    def _make_card(self, parent: tk.Frame, title: str = "", description: str = "") -> tk.Frame:
+        """Create a raised card.  Returns the body Frame for placing widgets."""
+        card = tk.Frame(
+            parent, bg=ColorTheme.BG_CARD_RAISED, bd=0,
+            highlightthickness=1, highlightbackground=ColorTheme.CARD_BORDER,
         )
-        model_combo = self._create_labeled_field(
-            frame,
-            "Model",
-            lambda p, **kw: self._create_modern_combobox(p, **kw),
-            row=1,
-            textvariable=self.var_model,
-            values=["tiny", "base", "small", "medium", "large-v2"],
-            width=28
+        card.pack(fill=tk.X, padx=20, pady=6)
+
+        if title:
+            hdr = tk.Frame(card, bg=ColorTheme.BG_CARD_RAISED)
+            hdr.pack(fill=tk.X, padx=16, pady=(10, 0))
+            tk.Label(
+                hdr, text=title, bg=ColorTheme.BG_CARD_RAISED,
+                fg=ColorTheme.TEXT_PRIMARY, font=("Segoe UI", 11, "bold"),
+            ).pack(anchor="w")
+            if description:
+                tk.Label(
+                    hdr, text=description, bg=ColorTheme.BG_CARD_RAISED,
+                    fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 9),
+                    wraplength=480, justify="left",
+                ).pack(anchor="w", pady=(2, 0))
+            tk.Frame(card, bg=ColorTheme.CARD_BORDER, height=1).pack(fill=tk.X, padx=16, pady=(8, 0))
+
+        body = tk.Frame(card, bg=ColorTheme.BG_CARD_RAISED)
+        body.pack(fill=tk.X, padx=16, pady=(8, 14))
+        return body
+
+    def _card_row(
+        self, parent: tk.Frame, label: str, help_text: str = "",
+    ) -> tk.Frame:
+        """Create a two-column label + widget row.  Returns the right-side frame."""
+        row = tk.Frame(parent, bg=ColorTheme.BG_CARD_RAISED)
+        row.pack(fill=tk.X, pady=5)
+
+        lbl_col = tk.Frame(row, bg=ColorTheme.BG_CARD_RAISED, width=190)
+        lbl_col.pack(side=tk.LEFT)
+        lbl_col.pack_propagate(False)
+        tk.Label(
+            lbl_col, text=label, bg=ColorTheme.BG_CARD_RAISED,
+            fg=ColorTheme.TEXT_PRIMARY, font=("Segoe UI", 10), anchor="w",
+        ).pack(anchor="w")
+        if help_text:
+            tk.Label(
+                lbl_col, text=help_text, bg=ColorTheme.BG_CARD_RAISED,
+                fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 8),
+                wraplength=165, anchor="w", justify="left",
+            ).pack(anchor="w")
+
+        widget_col = tk.Frame(row, bg=ColorTheme.BG_CARD_RAISED)
+        widget_col.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        return widget_col
+
+    def _make_combobox(
+        self, parent, textvariable=None, values=None, width: int = 24,
+    ) -> ttk.Combobox:
+        combo = ttk.Combobox(
+            parent, textvariable=textvariable,
+            values=values or [], state="readonly",
+            width=width, font=('Segoe UI', 10),
+            style='Modern.TCombobox',
         )
-        
-        # Device
-        self.var_device = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.stt.device
+        return combo
+
+    def _make_checkbutton(self, parent, text: str, variable) -> ttk.Checkbutton:
+        return ttk.Checkbutton(
+            parent, text=text, variable=variable,
+            style='Modern.TCheckbutton',
         )
-        device_combo = self._create_labeled_field(
-            frame,
-            "Device",
-            lambda p, **kw: self._create_modern_combobox(p, **kw),
-            row=2,
-            textvariable=self.var_device,
-            values=["auto", "cpu", "cuda"],
-            width=28
+
+    # ------------------------------------------------------------------
+    # Panels
+    # ------------------------------------------------------------------
+
+    def _build_general_panel(self, panel: tk.Frame) -> None:
+        self._panel_header(panel, "General", "Hotkey binding and startup behaviour")
+
+        # ── Hotkey card ────────────────────────────────────────────────
+        body = self._make_card(panel, "Push-to-Talk Hotkey",
+                               "Click the field then press your desired key combination.")
+        wc = self._card_row(body, "Hotkey", "Global shortcut to start/stop dictation")
+        self.var_hotkey = tk.StringVar(master=self.win, value=self.cfgm.config.ui.hotkey)
+        HotkeyCapture(wc, textvariable=self.var_hotkey, width=22).pack(anchor="w")
+
+        # ── Startup card ───────────────────────────────────────────────
+        body2 = self._make_card(panel, "Startup & Tray")
+        self.var_start_minimized = tk.BooleanVar(
+            master=self.win, value=self.cfgm.config.ui.start_minimized,
         )
-        
-        # Compute Type
-        self.var_compute = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.stt.compute_type
+        self._make_checkbutton(
+            body2, "Start minimised to tray", self.var_start_minimized,
+        ).pack(anchor="w", pady=3)
+
+        self.var_close_to_tray = tk.BooleanVar(
+            master=self.win, value=self.cfgm.config.ui.close_to_tray,
         )
-        compute_combo = self._create_labeled_field(
-            frame,
-            "Compute Type",
-            lambda p, **kw: self._create_modern_combobox(p, **kw),
-            row=3,
-            textvariable=self.var_compute,
-            values=["float16", "float32", "int8"],
-            width=28
+        self._make_checkbutton(
+            body2, "Closing window sends app to tray (don't quit)", self.var_close_to_tray,
+        ).pack(anchor="w", pady=3)
+
+    def _build_speech_panel(self, panel: tk.Frame) -> None:
+        self._panel_header(panel, "Speech", "Speech-to-text model and compute settings")
+
+        # ── Model card ─────────────────────────────────────────────────
+        body = self._make_card(
+            panel, "STT Model",
+            "Larger models are more accurate but slower. Restart required after changes.",
         )
-        
-        # Filler Word Removal
+        # Backend selector (controls which options are shown)
+        inferred_backend = "nemo" if str(self.cfgm.config.stt.model) == "canary-qwen-2.5b" else "whisper"
+        cfg_backend = getattr(self.cfgm.config.stt, "backend", inferred_backend)
+
+        wc0 = self._card_row(body, "Backend", "Whisper (faster-whisper) or NeMo (Canary)")
+        self.var_backend = tk.StringVar(master=self.win, value=str(cfg_backend))
+        self.backend_combo = self._make_combobox(
+            wc0, textvariable=self.var_backend, values=["whisper", "nemo"], width=20
+        )
+        self.backend_combo.pack(anchor="w")
+
+        wc = self._card_row(body, "Model", "Options depend on backend")
+        self.var_model = tk.StringVar(master=self.win, value=self.cfgm.config.stt.model)
+        self.model_combo = self._make_combobox(wc, textvariable=self.var_model, values=[], width=20)
+        self.model_combo.pack(anchor="w")
+
+        wc2 = self._card_row(body, "Device", "Restart required")
+        self.var_device = tk.StringVar(master=self.win, value=self.cfgm.config.stt.device)
+        self._make_combobox(
+            wc2, textvariable=self.var_device,
+            values=["auto", "cpu", "cuda"], width=20,
+        ).pack(anchor="w")
+
+        wc3 = self._card_row(body, "Compute Type",
+                              "int8_float16 is fastest on CUDA")
+        self.var_compute = tk.StringVar(master=self.win, value=self.cfgm.config.stt.compute_type)
+        self._make_combobox(
+            wc3, textvariable=self.var_compute,
+            values=["float16", "float32", "int8", "int8_float16"], width=20,
+        ).pack(anchor="w")
+
+        wc4 = self._card_row(body, "Language", "e.g. en, fr, de — leave blank for auto")
+        self.var_language = tk.StringVar(
+            master=self.win, value=getattr(self.cfgm.config.stt, 'language', 'en'),
+        )
+        ModernEntry(wc4, textvariable=self.var_language, width=10).pack(anchor="w")
+
+        # Keep row handles so we can hide/show based on backend choice
+        self._stt_row_model = wc.master
+        self._stt_row_compute = wc3.master
+        self._stt_row_language = wc4.master
+
+        def _sync_backend_ui(*_args) -> None:
+            backend = (self.var_backend.get() or "whisper").strip().lower()
+
+            if backend == "nemo":
+                # NeMo backend currently exposes Canary only in this app.
+                self.model_combo.configure(values=["canary-qwen-2.5b"])
+                if self.var_model.get().strip().lower() != "canary-qwen-2.5b":
+                    self.var_model.set("canary-qwen-2.5b")
+
+                # Hide Whisper-only compute_type for NeMo
+                self._stt_row_compute.pack_forget()
+
+                # Canary is English-only; keep the field but nudge towards "en"
+                if not self.var_language.get().strip():
+                    self.var_language.set("en")
+            else:
+                # Whisper backend
+                self.model_combo.configure(values=["tiny", "base", "small", "medium", "large-v2", "large-v3"])
+                if self.var_model.get().strip().lower() == "canary-qwen-2.5b":
+                    self.var_model.set("large-v3")
+
+                # Ensure compute_type row is visible (pack again in original order)
+                if not self._stt_row_compute.winfo_ismapped():
+                    self._stt_row_compute.pack(fill=tk.X, pady=5)
+
+        def _sync_backend_from_model(*_args) -> None:
+            model = (self.var_model.get() or "").strip().lower()
+            if model == "canary-qwen-2.5b":
+                if (self.var_backend.get() or "").strip().lower() != "nemo":
+                    self.var_backend.set("nemo")
+            else:
+                if (self.var_backend.get() or "").strip().lower() == "nemo":
+                    # If user flips model away from canary, keep backend as-is (they may want NeMo later).
+                    pass
+
+        self.var_backend.trace_add("write", _sync_backend_ui)
+        self.var_model.trace_add("write", _sync_backend_from_model)
+        _sync_backend_ui()
+
+        # ── Post-processing card ────────────────────────────────────────
+        body2 = self._make_card(
+            panel, "Post-Processing",
+            "Requires the Brain / AI module (Ollama) to be enabled.",
+        )
         self.var_remove_fillers = tk.BooleanVar(
             master=self.win,
-            value=getattr(self.cfgm.config.stt, 'remove_filler_words', False)
+            value=getattr(self.cfgm.config.stt, 'remove_filler_words', False),
         )
-        filler_check = ttk.Checkbutton(
-            frame,
-            text="Remove filler words (um, uh, etc.)",
-            variable=self.var_remove_fillers,
-            style='Modern.TCheckbutton'
-        )
-        filler_check.grid(row=4, column=0, columnspan=2, sticky='w', padx=16, pady=8)
-        
-        # Grammar Improvement
+        self._make_checkbutton(
+            body2, "Remove filler words (um, uh, like…)", self.var_remove_fillers,
+        ).pack(anchor="w", pady=3)
+
         self.var_improve_grammar = tk.BooleanVar(
             master=self.win,
-            value=getattr(self.cfgm.config.stt, 'improve_grammar', False)
+            value=getattr(self.cfgm.config.stt, 'improve_grammar', False),
         )
-        grammar_check = ttk.Checkbutton(
-            frame,
-            text="Improve grammar (context-aware corrections)",
-            variable=self.var_improve_grammar,
-            style='Modern.TCheckbutton'
-        )
-        grammar_check.grid(row=5, column=0, columnspan=2, sticky='w', padx=16, pady=8)
+        self._make_checkbutton(
+            body2, "Improve grammar with context-aware corrections",
+            self.var_improve_grammar,
+        ).pack(anchor="w", pady=3)
 
-    def _create_audio_tab(self) -> None:
-        """Create the Audio settings tab."""
-        frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(frame, text="Audio          ")
-        
-        frame.columnconfigure(1, weight=1)
-        
-        # Get audio devices
+    def _build_audio_panel(self, panel: tk.Frame) -> None:
+        self._panel_header(panel, "Audio", "Microphone and voice-activity detection")
+
+        # ── Input device card ──────────────────────────────────────────
+        body = self._make_card(panel, "Input Device")
         devices = AudioCapture().list_devices()
         device_names = [f"{d['id']}: {d['name']}" for d in devices]
-        
-        # Input Device
-        device_id_val = "default" if self.cfgm.config.audio.device_id is None else str(self.cfgm.config.audio.device_id)
+        device_id_val = (
+            "default" if self.cfgm.config.audio.device_id is None
+            else str(self.cfgm.config.audio.device_id)
+        )
         self.var_device_id = tk.StringVar(master=self.win, value=device_id_val)
-        
-        device_combo = self._create_labeled_field(
-            frame,
-            "Input Device",
-            lambda p, **kw: self._create_modern_combobox(p, **kw),
-            row=0,
-            textvariable=self.var_device_id,
-            values=["default"] + device_names,
-            width=40
-        )
-        
-        # Sample Rate
-        self.var_sr = tk.IntVar(
-            master=self.win,
-            value=self.cfgm.config.audio.sample_rate
-        )
-        sr_entry = self._create_labeled_field(
-            frame,
-            "Sample Rate",
-            lambda p, **kw: ModernEntry(p, **kw),
-            row=1,
-            textvariable=self.var_sr,
-            width=15
-        )
+        wc = self._card_row(body, "Microphone")
+        self._make_combobox(
+            wc, textvariable=self.var_device_id,
+            values=["default"] + device_names, width=34,
+        ).pack(anchor="w")
 
-    def _create_streaming_tab(self) -> None:
-        """Create the Streaming settings tab."""
-        frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(frame, text="Streaming          ")
-        
-        frame.columnconfigure(1, weight=1)
-        
-        # Mode
-        self.var_stream_mode = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.streaming.mode
-        )
-        mode_combo = self._create_labeled_field(
-            frame,
-            "Mode",
-            lambda p, **kw: self._create_modern_combobox(p, **kw),
-            row=0,
-            textvariable=self.var_stream_mode,
-            values=["final_only"],
-            width=20
-        )
-        
-        # Segmentation
-        self.var_seg = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.streaming.segmentation
-        )
-        seg_combo = self._create_labeled_field(
-            frame,
-            "Segmentation",
-            lambda p, **kw: self._create_modern_combobox(p, **kw),
-            row=1,
-            textvariable=self.var_seg,
-            values=["energy", "vad"],
-            width=20
-        )
-        
-        # Min Segment
-        self.var_min_seg = tk.DoubleVar(
-            master=self.win,
-            value=self.cfgm.config.streaming.min_segment_sec
-        )
-        min_seg_entry = self._create_labeled_field(
-            frame,
-            "Min Segment (s)",
-            lambda p, **kw: ModernEntry(p, **kw),
-            row=2,
-            textvariable=self.var_min_seg,
-            width=12
-        )
-        
-        # Min Silence
-        self.var_min_sil = tk.DoubleVar(
-            master=self.win,
-            value=self.cfgm.config.streaming.min_silence_sec
-        )
-        min_sil_entry = self._create_labeled_field(
-            frame,
-            "Min Silence (s)",
-            lambda p, **kw: ModernEntry(p, **kw),
-            row=3,
-            textvariable=self.var_min_sil,
-            width=12
-        )
-        
-        # Energy Threshold
-        self.var_energy = tk.DoubleVar(
-            master=self.win,
-            value=self.cfgm.config.streaming.energy_threshold
-        )
-        energy_entry = self._create_labeled_field(
-            frame,
-            "Energy Threshold",
-            lambda p, **kw: ModernEntry(p, **kw),
-            row=4,
-            textvariable=self.var_energy,
-            width=12
-        )
+        wc2 = self._card_row(body, "Sample Rate", "16000 Hz recommended for Whisper")
+        self.var_sr = tk.IntVar(master=self.win, value=self.cfgm.config.audio.sample_rate)
+        ModernEntry(wc2, textvariable=self.var_sr, width=10).pack(anchor="w")
 
-    def _create_decoding_tab(self) -> None:
-        """Create the Decoding settings tab."""
-        frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(frame, text="Decoding          ")
-        
-        frame.columnconfigure(1, weight=1)
-        
-        # Beam Size
-        self.var_beam = tk.IntVar(
-            master=self.win,
-            value=self.cfgm.config.decoding.beam_size
+        # ── VAD card ───────────────────────────────────────────────────
+        body2 = self._make_card(
+            panel, "Voice Activity Detection",
+            "Controls how Vype decides when you start and stop speaking.",
         )
-        beam_entry = self._create_labeled_field(
-            frame,
-            "Beam Size",
-            lambda p, **kw: ModernEntry(p, **kw),
-            row=0,
-            textvariable=self.var_beam,
-            width=12
+        wc3 = self._card_row(body2, "VAD Method")
+        self.var_vad_method = tk.StringVar(
+            master=self.win, value=self.cfgm.config.vad.method,
         )
-        
-        # Temperature
-        self.var_temp = tk.DoubleVar(
-            master=self.win,
-            value=self.cfgm.config.decoding.temperature
-        )
-        temp_entry = self._create_labeled_field(
-            frame,
-            "Temperature",
-            lambda p, **kw: ModernEntry(p, **kw),
-            row=1,
-            textvariable=self.var_temp,
-            width=12
-        )
+        self._make_combobox(
+            wc3, textvariable=self.var_vad_method,
+            values=["silero", "energy"], width=16,
+        ).pack(anchor="w")
 
-    def _create_appearance_tab(self) -> None:
-        """Create the Appearance settings tab."""
-        frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(frame, text="Appearance          ")
-        
-        frame.columnconfigure(1, weight=1)
-        
-        # Color pickers for different states
+        wc4 = self._card_row(body2, "Speech Threshold",
+                              "0.0–1.0; higher = less sensitive")
+        self.var_vad_threshold = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.vad.threshold,
+        )
+        ModernSlider(wc4, variable=self.var_vad_threshold,
+                     from_=0.0, to=1.0, resolution=0.05, width=160).pack(anchor="w")
+
+        wc5 = self._card_row(body2, "Min Speech (ms)",
+                              "Minimum speech duration to count as a segment")
+        self.var_vad_min_speech = tk.IntVar(
+            master=self.win, value=self.cfgm.config.vad.min_speech_duration_ms,
+        )
+        ModernEntry(wc5, textvariable=self.var_vad_min_speech, width=8).pack(anchor="w")
+
+        wc6 = self._card_row(body2, "Min Silence (ms)",
+                              "Silence duration that ends a segment")
+        self.var_vad_min_silence = tk.IntVar(
+            master=self.win, value=self.cfgm.config.vad.min_silence_duration_ms,
+        )
+        ModernEntry(wc6, textvariable=self.var_vad_min_silence, width=8).pack(anchor="w")
+
+    def _build_commands_panel(self, panel: tk.Frame) -> None:
+        self._panel_header(panel, "Commands",
+                           "Voice commands and punctuation handling")
+
+        # ── Voice commands card ────────────────────────────────────────
+        body = self._make_card(
+            panel, "Voice Commands",
+            "Say phrases like 'new line', 'stop dictation', 'undo' to trigger actions.",
+        )
+        self.var_commands_enabled = tk.BooleanVar(
+            master=self.win, value=self.cfgm.config.commands.enabled,
+        )
+        self._make_checkbutton(
+            body, "Enable voice commands", self.var_commands_enabled,
+        ).pack(anchor="w", pady=3)
+
+        # ── Punctuation card ───────────────────────────────────────────
+        body2 = self._make_card(
+            panel, "Punctuation",
+            "Auto mode uses Whisper's built-in punctuation. "
+            "Manual lets you say 'period', 'comma', etc. "
+            "Hybrid uses both (voice commands override auto).",
+        )
+        wc = self._card_row(body2, "Punctuation Mode")
+        self.var_punct_mode = tk.StringVar(
+            master=self.win, value=self.cfgm.config.punctuation.mode,
+        )
+        self._make_combobox(
+            wc, textvariable=self.var_punct_mode,
+            values=["auto", "manual", "hybrid"], width=16,
+        ).pack(anchor="w")
+
+        self.var_auto_capitalize = tk.BooleanVar(
+            master=self.win, value=self.cfgm.config.punctuation.auto_capitalize,
+        )
+        self._make_checkbutton(
+            body2, "Auto-capitalise start of sentences",
+            self.var_auto_capitalize,
+        ).pack(anchor="w", pady=(6, 3))
+
+    def _build_brain_panel(self, panel: tk.Frame) -> None:
+        self._panel_header(panel, "Brain / AI",
+                           "Local LLM integration via Ollama for enhanced transcription")
+
+        # ── Connection card ────────────────────────────────────────────
+        body = self._make_card(
+            panel, "Ollama Connection",
+            "Ollama must be running locally. Install from ollama.com.",
+        )
+        self.var_brain_enabled = tk.BooleanVar(
+            master=self.win, value=self.cfgm.config.brain.enabled,
+        )
+        self._make_checkbutton(
+            body, "Enable AI Brain (requires Ollama)", self.var_brain_enabled,
+        ).pack(anchor="w", pady=(0, 6))
+
+        wc = self._card_row(body, "Endpoint URL", "Default: http://localhost:11434")
+        self.var_brain_endpoint = tk.StringVar(
+            master=self.win, value=self.cfgm.config.brain.endpoint,
+        )
+        ModernEntry(wc, textvariable=self.var_brain_endpoint, width=28).pack(anchor="w")
+
+        wc2 = self._card_row(body, "LLM Model",
+                              "Must be pulled in Ollama first")
+        self.var_brain_model = tk.StringVar(
+            master=self.win, value=self.cfgm.config.brain.model,
+        )
+        self._make_combobox(
+            wc2, textvariable=self.var_brain_model,
+            values=["llama3.2", "llama3", "llama3.1", "mistral", "mistral-nemo",
+                    "phi3", "gemma2", "qwen2.5"],
+            width=24,
+        ).pack(anchor="w")
+
+        wc3 = self._card_row(body, "Timeout (s)", "Max wait for LLM response")
+        self.var_brain_timeout = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.brain.timeout_sec,
+        )
+        ModernSlider(wc3, variable=self.var_brain_timeout,
+                     from_=1.0, to=30.0, resolution=0.5, width=160).pack(anchor="w")
+
+        # ── Feature toggles card ───────────────────────────────────────
+        body2 = self._make_card(
+            panel, "Features",
+            "Each feature adds latency.  Disable if your LLM is slow.",
+        )
+        self.var_intent_routing = tk.BooleanVar(
+            master=self.win, value=self.cfgm.config.brain.intent_routing_enabled,
+        )
+        self._make_checkbutton(
+            body2, "Intent routing  (map phrases to commands)",
+            self.var_intent_routing,
+        ).pack(anchor="w", pady=3)
+
+        self.var_refinement = tk.BooleanVar(
+            master=self.win, value=self.cfgm.config.brain.refinement_enabled,
+        )
+        self._make_checkbutton(
+            body2, "Text refinement  (grammar + filler removal)",
+            self.var_refinement,
+        ).pack(anchor="w", pady=3)
+
+        self.var_context_summarizer = tk.BooleanVar(
+            master=self.win, value=self.cfgm.config.brain.context_summarizer_enabled,
+        )
+        self._make_checkbutton(
+            body2, "Context summariser  (rolling transcript window)",
+            self.var_context_summarizer,
+        ).pack(anchor="w", pady=3)
+
+        # Context window card
+        body3 = self._make_card(panel, "Context Window")
+        wc4 = self._card_row(body3, "Window (seconds)",
+                              "How many seconds of transcript to keep in context")
+        self.var_context_window = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.brain.context_window_sec,
+        )
+        ModernSlider(wc4, variable=self.var_context_window,
+                     from_=30.0, to=300.0, resolution=10.0, width=180).pack(anchor="w")
+
+    def _build_appearance_panel(self, panel: tk.Frame) -> None:
+        self._panel_header(panel, "Appearance",
+                           "Overlay colours, sizes, and window opacity")
+
+        # ── Accent colours card ────────────────────────────────────────
+        body = self._make_card(
+            panel, "Accent Colours",
+            "The overlay circle changes colour to reflect app state.",
+        )
+        wc = self._card_row(body, "Idle")
         self.var_color_idle = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.ui.accent_color_idle
+            master=self.win, value=self.cfgm.config.ui.accent_color_idle,
         )
-        idle_color = self._create_labeled_field(
-            frame,
-            "Idle Color",
-            lambda p, **kw: ColorPicker(p, **kw),
-            row=0,
-            textvariable=self.var_color_idle,
-            width=15
-        )
-        
-        self.var_color_recording = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.ui.accent_color_recording
-        )
-        recording_color = self._create_labeled_field(
-            frame,
-            "Recording Color",
-            lambda p, **kw: ColorPicker(p, **kw),
-            row=1,
-            textvariable=self.var_color_recording,
-            width=15
-        )
-        
-        self.var_color_processing = tk.StringVar(
-            master=self.win,
-            value=self.cfgm.config.ui.accent_color_processing
-        )
-        processing_color = self._create_labeled_field(
-            frame,
-            "Processing Color",
-            lambda p, **kw: ColorPicker(p, **kw),
-            row=2,
-            textvariable=self.var_color_processing,
-            width=15
-        )
-        
-        # Transparency sliders
-        self.var_settings_opacity = tk.DoubleVar(
-            master=self.win,
-            value=self.cfgm.config.ui.settings_window_opacity
-        )
-        settings_opacity = self._create_labeled_field(
-            frame,
-            "Settings Opacity",
-            lambda p, **kw: ModernSlider(p, **kw),
-            row=3,
-            variable=self.var_settings_opacity,
-            from_=0.7,
-            to=1.0,
-            resolution=0.05,
-            width=180
-        )
-        
-        self.var_overlay_opacity = tk.DoubleVar(
-            master=self.win,
-            value=self.cfgm.config.ui.overlay_opacity
-        )
-        overlay_opacity = self._create_labeled_field(
-            frame,
-            "Overlay Opacity",
-            lambda p, **kw: ModernSlider(p, **kw),
-            row=4,
-            variable=self.var_overlay_opacity,
-            from_=0.5,
-            to=1.0,
-            resolution=0.05,
-            width=180
-        )
-        
-        # Visualizer size slider
-        self.var_visualizer_size = tk.IntVar(
-            master=self.win,
-            value=self.cfgm.config.ui.visualizer_size
-        )
-        visualizer_size = self._create_labeled_field(
-            frame,
-            "Visualizer Size",
-            lambda p, **kw: ModernSlider(p, **kw),
-            row=5,
-            variable=self.var_visualizer_size,
-            from_=50,
-            to=120,
-            resolution=10,
-            width=180
-        )
-        
-        # Info label
-        info_label = ttk.Label(
-            frame,
-            text="Note: Some changes may require restarting the app",
-            style='Modern.TLabel',
-            font=('Segoe UI', 8),
-            foreground=ColorTheme.TEXT_SECONDARY
-        )
-        info_label.grid(row=6, column=0, columnspan=2, sticky='w', padx=16, pady=(20, 8))
+        ColorPicker(wc, textvariable=self.var_color_idle, width=12).pack(anchor="w")
 
-    def _create_models_tab(self) -> None:
-        """Create the Models management tab."""
-        frame = ttk.Frame(self.notebook, style='Modern.TFrame')
-        self.notebook.add(frame, text="Models          ")
-        
-        # Create scrollable content
-        canvas = tk.Canvas(frame, bg=ColorTheme.BG_DARK, highlightthickness=0)
-        
-        # Custom styled scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview, style='Modern.Vertical.TScrollbar')
-        scrollable_frame = ttk.Frame(canvas, style='Modern.TFrame')
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        wc2 = self._card_row(body, "Recording")
+        self.var_color_recording = tk.StringVar(
+            master=self.win, value=self.cfgm.config.ui.accent_color_recording,
         )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Section 1: Installed Models
-        ttk.Label(
-            scrollable_frame,
-            text="Installed Models",
-            style='Title.TLabel'
-        ).pack(anchor='w', padx=16, pady=(10, 5))
-        
-        self.installed_models_frame = ttk.Frame(scrollable_frame, style='Modern.TFrame')
-        self.installed_models_frame.pack(fill=tk.X, padx=16, pady=5)
-        
-        # Refresh button for installed models
-        refresh_btn = ModernButton(
-            self.installed_models_frame,
-            text="Refresh",
-            command=self._refresh_installed_models,
-            width=100,
-            height=30
+        ColorPicker(wc2, textvariable=self.var_color_recording, width=12).pack(anchor="w")
+
+        wc3 = self._card_row(body, "Processing")
+        self.var_color_processing = tk.StringVar(
+            master=self.win, value=self.cfgm.config.ui.accent_color_processing,
         )
-        refresh_btn.pack(anchor='w', pady=5)
-        
-        self.installed_models_list = ttk.Frame(self.installed_models_frame, style='Modern.TFrame')
-        self.installed_models_list.pack(fill=tk.X, pady=5)
-        
-        # Section 2: Download Models
-        ttk.Label(
-            scrollable_frame,
-            text="Download Models",
-            style='Title.TLabel'
-        ).pack(anchor='w', padx=16, pady=(20, 5))
-        
-        download_frame = ttk.Frame(scrollable_frame, style='Modern.TFrame')
-        download_frame.pack(fill=tk.X, padx=16, pady=5)
-        
-        # Model selection dropdown
-        ttk.Label(
-            download_frame,
-            text="Select Model:",
-            style='Modern.TLabel'
-        ).grid(row=0, column=0, sticky='w', padx=(0, 10), pady=5)
-        
-        self.var_download_model = tk.StringVar(value="base")
-        available_models = list(self.model_manager.AVAILABLE_MODELS.keys())
-        
-        download_combo = ModernDropdown(
-            download_frame,
-            textvariable=self.var_download_model,
-            values=available_models,
-            width=20
+        ColorPicker(wc3, textvariable=self.var_color_processing, width=12).pack(anchor="w")
+
+        # ── Overlay card ───────────────────────────────────────────────
+        body2 = self._make_card(panel, "Overlay")
+        wc4 = self._card_row(body2, "Size (px)", "50–120 px diameter")
+        self.var_visualizer_size = tk.IntVar(
+            master=self.win, value=self.cfgm.config.ui.visualizer_size,
         )
-        download_combo.grid(row=0, column=1, sticky='w', pady=5)
-        
-        download_btn = ModernButton(
-            download_frame,
-            text="Download Model",
-            command=self._download_selected_model,
-            width=140,
-            height=36,
-            primary=True
+        ModernSlider(wc4, variable=self.var_visualizer_size,
+                     from_=50, to=120, resolution=5, width=180).pack(anchor="w")
+
+        wc5 = self._card_row(body2, "Opacity")
+        self.var_overlay_opacity = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.ui.overlay_opacity,
         )
-        download_btn.grid(row=0, column=2, sticky='w', padx=10, pady=5)
-        
-        # Model info display
-        self.model_info_label = ttk.Label(
-            download_frame,
-            text="",
-            style='Modern.TLabel',
-            font=('Segoe UI', 9),
-            foreground=ColorTheme.TEXT_SECONDARY,
-            wraplength=500
+        ModernSlider(wc5, variable=self.var_overlay_opacity,
+                     from_=0.5, to=1.0, resolution=0.05, width=180).pack(anchor="w")
+
+        # ── Settings window card ───────────────────────────────────────
+        body3 = self._make_card(panel, "Settings Window")
+        wc6 = self._card_row(body3, "Window Opacity",
+                              "Applies immediately on next open")
+        self.var_settings_opacity = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.ui.settings_window_opacity,
         )
-        self.model_info_label.grid(row=1, column=0, columnspan=3, sticky='w', pady=5)
-        
-        # Update info when selection changes
-        self.var_download_model.trace_add('write', lambda *args: self._update_model_info())
-        self._update_model_info()
-        
-        # HuggingFace URL input
-        ttk.Label(
-            download_frame,
-            text="Or paste HuggingFace URL:",
-            style='Modern.TLabel'
-        ).grid(row=2, column=0, sticky='w', padx=(0, 10), pady=(10, 5))
-        
-        self.var_hf_url = tk.StringVar()
-        hf_entry = ModernEntry(
-            download_frame,
-            textvariable=self.var_hf_url,
-            width=40
+        ModernSlider(wc6, variable=self.var_settings_opacity,
+                     from_=0.7, to=1.0, resolution=0.05, width=180).pack(anchor="w")
+
+        tk.Label(
+            panel, text="Note: size and opacity changes take effect on next launch",
+            bg=ColorTheme.BG_DARK, fg=ColorTheme.TEXT_DISABLED,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=20, pady=(4, 12))
+
+    def _build_advanced_panel(self, panel: tk.Frame) -> None:
+        self._panel_header(panel, "Advanced",
+                           "Streaming, decoding, and text-output tuning")
+
+        # ── Streaming card ─────────────────────────────────────────────
+        body = self._make_card(
+            panel, "Streaming & Segmentation",
+            "Controls how audio is chunked before being sent to Whisper.",
         )
-        hf_entry.grid(row=2, column=1, columnspan=2, sticky='w', pady=(10, 5))
-        
-        # Section 3: Manual Installation
-        ttk.Label(
-            scrollable_frame,
-            text="Manual Installation",
-            style='Title.TLabel'
-        ).pack(anchor='w', padx=16, pady=(20, 5))
-        
-        manual_frame = ttk.Frame(scrollable_frame, style='Modern.TFrame')
-        manual_frame.pack(fill=tk.X, padx=16, pady=5)
-        
-        instructions = (
-            "To manually install a model:\n"
-            "1. Download the model files from HuggingFace\n"
-            "2. Place them in the model directory\n"
-            "3. Click 'Refresh' to detect new models"
+        wc = self._card_row(body, "Segmentation")
+        self.var_seg = tk.StringVar(
+            master=self.win, value=self.cfgm.config.streaming.segmentation,
         )
-        
-        ttk.Label(
-            manual_frame,
-            text=instructions,
-            style='Modern.TLabel',
-            font=('Segoe UI', 9),
-            foreground=ColorTheme.TEXT_SECONDARY
-        ).pack(anchor='w', pady=5)
-        
-        open_folder_btn = ModernButton(
-            manual_frame,
-            text="Open Model Folder",
-            command=self._open_model_folder,
-            width=150,
-            height=36
+        self._make_combobox(wc, textvariable=self.var_seg,
+                            values=["vad", "energy"], width=14).pack(anchor="w")
+
+        wc2 = self._card_row(body, "Min Segment (s)")
+        self.var_min_seg = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.streaming.min_segment_sec,
         )
-        open_folder_btn.pack(anchor='w', pady=10)
-        
-        # Section 4: Model Testing
-        ttk.Label(
-            scrollable_frame,
-            text="Model Testing",
-            style='Title.TLabel'
-        ).pack(anchor='w', padx=16, pady=(20, 5))
-        
-        test_frame = ttk.Frame(scrollable_frame, style='Modern.TFrame')
-        test_frame.pack(fill=tk.X, padx=16, pady=5)
-        
-        ttk.Label(
-            test_frame,
-            text="Test installed models to compare performance on your system",
-            style='Modern.TLabel',
-            font=('Segoe UI', 9),
-            foreground=ColorTheme.TEXT_SECONDARY
-        ).pack(anchor='w', pady=5)
-        
-        test_btn = ModernButton(
-            test_frame,
-            text="Test All Models",
-            command=self._test_models,
-            width=140,
-            height=36,
-            primary=True
+        ModernEntry(wc2, textvariable=self.var_min_seg, width=8).pack(anchor="w")
+
+        wc3 = self._card_row(body, "Min Silence (s)")
+        self.var_min_sil = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.streaming.min_silence_sec,
         )
-        test_btn.pack(anchor='w', pady=10)
-        
-        # Test results display
-        self.test_results_text = tk.Text(
-            test_frame,
-            height=10,
-            bg=ColorTheme.BG_CARD,
-            fg=ColorTheme.TEXT_PRIMARY,
-            font=('Consolas', 9),
-            wrap=tk.WORD,
-            state=tk.DISABLED
+        ModernEntry(wc3, textvariable=self.var_min_sil, width=8).pack(anchor="w")
+
+        wc4 = self._card_row(body, "Energy Threshold",
+                              "Used when segmentation=energy")
+        self.var_energy = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.streaming.energy_threshold,
         )
-        self.test_results_text.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # Initial refresh
+        ModernEntry(wc4, textvariable=self.var_energy, width=8).pack(anchor="w")
+
+        # ── Decoding card ──────────────────────────────────────────────
+        body2 = self._make_card(
+            panel, "Decoding",
+            "Whisper beam search and sampling parameters.",
+        )
+        wc5 = self._card_row(body2, "Beam Size",
+                             "Higher = more accurate, slower  (1–10)")
+        self.var_beam = tk.IntVar(
+            master=self.win, value=self.cfgm.config.decoding.beam_size,
+        )
+        ModernEntry(wc5, textvariable=self.var_beam, width=8).pack(anchor="w")
+
+        wc6 = self._card_row(body2, "Temperature",
+                             "0.0 = deterministic (recommended)")
+        self.var_temp = tk.DoubleVar(
+            master=self.win, value=self.cfgm.config.decoding.temperature,
+        )
+        ModernEntry(wc6, textvariable=self.var_temp, width=8).pack(anchor="w")
+
+        # ── Output card ────────────────────────────────────────────────
+        body3 = self._make_card(
+            panel, "Text Output",
+            "How transcribed text is injected into the active window.",
+        )
+        wc7 = self._card_row(body3, "Primary Method",
+                             "keyboard: simulate keypresses\nclipboard: paste via clipboard")
+        self.var_output_method = tk.StringVar(
+            master=self.win, value=self.cfgm.config.output.primary_method,
+        )
+        self._make_combobox(
+            wc7, textvariable=self.var_output_method,
+            values=["keyboard", "clipboard", "uia", "win32"], width=18,
+        ).pack(anchor="w")
+
+        wc8 = self._card_row(body3, "Clipboard threshold (chars)",
+                             "Switch to clipboard paste for segments longer than this")
+        self.var_prefer_clipboard = tk.IntVar(
+            master=self.win,
+            value=self.cfgm.config.output.prefer_clipboard_over_chars,
+        )
+        ModernEntry(wc8, textvariable=self.var_prefer_clipboard, width=8).pack(anchor="w")
+
+    def _build_models_panel(self, panel: tk.Frame) -> None:
+        self._panel_header(panel, "Models",
+                           "Install, download, and benchmark Whisper models")
+
+        # ── Installed card ─────────────────────────────────────────────
+        body = self._make_card(panel, "Installed Models")
+        ModernButton(
+            body, text="Refresh", command=self._refresh_installed_models,
+            width=90, height=30,
+        ).pack(anchor="w", pady=(0, 6))
+        self.installed_models_list = tk.Frame(body, bg=ColorTheme.BG_CARD_RAISED)
+        self.installed_models_list.pack(fill=tk.X)
         self._refresh_installed_models()
 
-    def _refresh_installed_models(self):
-        """Refresh the list of installed models."""
-        # Clear existing list
-        for widget in self.installed_models_list.winfo_children():
-            widget.destroy()
-        
-        # Get installed models
+        # ── Download card ──────────────────────────────────────────────
+        body2 = self._make_card(
+            panel, "Download Models",
+            "Models are stored in the Vype model directory.",
+        )
+        dl_row = tk.Frame(body2, bg=ColorTheme.BG_CARD_RAISED)
+        dl_row.pack(fill=tk.X, pady=(0, 6))
+        self.var_download_model = tk.StringVar(value="base")
+        self._make_combobox(
+            dl_row, textvariable=self.var_download_model,
+            values=list(self.model_manager.AVAILABLE_MODELS.keys()), width=18,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        ModernButton(
+            dl_row, text="Download", command=self._download_selected_model,
+            width=110, height=30, primary=True,
+        ).pack(side=tk.LEFT)
+
+        self.model_info_label = tk.Label(
+            body2, text="", bg=ColorTheme.BG_CARD_RAISED,
+            fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 9),
+            wraplength=500, justify="left",
+        )
+        self.model_info_label.pack(anchor="w", pady=(0, 4))
+        self.var_download_model.trace_add('write', lambda *_: self._update_model_info())
+        self._update_model_info()
+
+        hf_row = tk.Frame(body2, bg=ColorTheme.BG_CARD_RAISED)
+        hf_row.pack(fill=tk.X, pady=(4, 0))
+        tk.Label(
+            hf_row, text="HuggingFace URL:", bg=ColorTheme.BG_CARD_RAISED,
+            fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 9),
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        self.var_hf_url = tk.StringVar()
+        ModernEntry(hf_row, textvariable=self.var_hf_url, width=32).pack(side=tk.LEFT)
+
+        # ── Manual install card ────────────────────────────────────────
+        body3 = self._make_card(panel, "Manual Installation")
+        tk.Label(
+            body3,
+            text=(
+                "1. Download model files from HuggingFace\n"
+                "2. Place them in the model directory\n"
+                "3. Click 'Refresh' above to detect new models"
+            ),
+            bg=ColorTheme.BG_CARD_RAISED, fg=ColorTheme.TEXT_SECONDARY,
+            font=("Segoe UI", 9), justify="left",
+        ).pack(anchor="w", pady=(0, 6))
+        ModernButton(
+            body3, text="Open Model Folder",
+            command=self._open_model_folder, width=150, height=30,
+        ).pack(anchor="w")
+
+        # ── NeMo / Canary card ─────────────────────────────────────────
+        body_nemo = self._make_card(
+            panel,
+            "NeMo / Canary Models",
+            "Canary-Qwen runs via NVIDIA NeMo (not managed by faster-whisper).",
+        )
+
+        self._nemo_status_label = tk.Label(
+            body_nemo, text="", bg=ColorTheme.BG_CARD_RAISED,
+            fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 9), justify="left",
+            wraplength=500,
+        )
+        self._nemo_status_label.pack(anchor="w", pady=(0, 6))
+
+        btn_row = tk.Frame(body_nemo, bg=ColorTheme.BG_CARD_RAISED)
+        btn_row.pack(fill=tk.X)
+        ModernButton(
+            btn_row, text="Refresh", command=self._refresh_nemo_models,
+            width=90, height=30,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        ModernButton(
+            btn_row, text="Cache Canary-Qwen-2.5B",
+            command=self._cache_canary_model,
+            width=190, height=30, primary=True,
+        ).pack(side=tk.LEFT)
+
+        self._refresh_nemo_models()
+
+        # ── Test card ──────────────────────────────────────────────────
+        body4 = self._make_card(
+            panel, "Model Benchmarking",
+            "Run all installed models on a test clip to compare speed and accuracy.",
+        )
+        ModernButton(
+            body4, text="Test All Models",
+            command=self._test_models, width=140, height=30, primary=True,
+        ).pack(anchor="w", pady=(0, 6))
+        self.test_results_text = tk.Text(
+            body4, height=9,
+            bg=ColorTheme.BG_CARD, fg=ColorTheme.TEXT_PRIMARY,
+            font=('Consolas', 9), wrap=tk.WORD, state=tk.DISABLED,
+            relief=tk.FLAT, highlightthickness=1,
+            highlightbackground=ColorTheme.CARD_BORDER,
+        )
+        self.test_results_text.pack(fill=tk.BOTH, expand=True)
+
+    # ------------------------------------------------------------------
+    # Footer
+    # ------------------------------------------------------------------
+
+    def _build_footer(self) -> None:
+        footer = tk.Frame(self.win, bg=ColorTheme.BG_DARKER, height=56)
+        footer.pack(side=tk.BOTTOM, fill=tk.X)
+        footer.pack_propagate(False)
+
+        # Thin separator above footer
+        tk.Frame(self.win, bg=ColorTheme.BORDER, height=1).pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Status badge (left)
+        self._status_label = tk.Label(
+            footer, text="", bg=ColorTheme.BG_DARKER,
+            fg=ColorTheme.ACCENT_SUCCESS, font=("Segoe UI", 9),
+        )
+        self._status_label.pack(side=tk.LEFT, padx=20, pady=14)
+
+        # Buttons (right)
+        btn_row = tk.Frame(footer, bg=ColorTheme.BG_DARKER)
+        btn_row.pack(side=tk.RIGHT, padx=16, pady=10)
+
+        ModernButton(
+            btn_row, text="Reset to Defaults",
+            command=self._reset_to_defaults, width=140, height=36,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        ModernButton(
+            btn_row, text="Save", command=self._save,
+            width=90, height=36, primary=True,
+        ).pack(side=tk.LEFT)
+
+    def _show_status(self, message: str, color: str = ColorTheme.ACCENT_SUCCESS) -> None:
+        if not self._status_label:
+            return
+        if self._status_after_id and self.win:
+            try:
+                self.win.after_cancel(self._status_after_id)
+            except Exception:
+                pass
+        self._status_label.configure(text=message, fg=color)
+
+        def _fade() -> None:
+            if self._status_label:
+                self._status_label.configure(text="")
+        self._status_after_id = self.win.after(3000, _fade) if self.win else None
+
+    # ------------------------------------------------------------------
+    # Models helpers
+    # ------------------------------------------------------------------
+
+    def _refresh_installed_models(self) -> None:
+        for w in self.installed_models_list.winfo_children():
+            w.destroy()
         installed = self.model_manager.list_installed_models()
-        
         if not installed:
-            ttk.Label(
-                self.installed_models_list,
-                text="No models installed yet",
-                style='Modern.TLabel',
-                foreground=ColorTheme.TEXT_SECONDARY
-            ).pack(anchor='w', pady=5)
+            tk.Label(
+                self.installed_models_list, text="No models installed yet",
+                bg=ColorTheme.BG_CARD_RAISED, fg=ColorTheme.TEXT_SECONDARY,
+                font=("Segoe UI", 9),
+            ).pack(anchor="w", pady=4)
         else:
             for model in installed:
-                model_frame = ttk.Frame(self.installed_models_list, style='Modern.TFrame')
-                model_frame.pack(fill=tk.X, pady=2)
-                
-                ttk.Label(
-                    model_frame,
-                    text=f"✓ {model.name} ({model.parameters}, {model.size_mb}MB)",
-                    style='Modern.TLabel'
-                ).pack(side=tk.LEFT, padx=5)
-    
-    def _update_model_info(self):
-        """Update the model information display."""
+                tk.Label(
+                    self.installed_models_list,
+                    text=f"✓  {model.name}  ({model.parameters}, {model.size_mb} MB)",
+                    bg=ColorTheme.BG_CARD_RAISED, fg=ColorTheme.TEXT_PRIMARY,
+                    font=("Segoe UI", 9),
+                ).pack(anchor="w", pady=2)
+
+    def _refresh_nemo_models(self) -> None:
+        """Refresh NeMo/Canary cache status."""
+        hub = Path.home() / ".cache" / "huggingface" / "hub"
+        cached_dir = hub / "models--nvidia--canary-qwen-2.5b"
+        cached = cached_dir.exists()
+
+        backend = (getattr(self.cfgm.config.stt, "backend", "") or "").strip().lower()
+        selected_model = str(self.cfgm.config.stt.model)
+
+        parts = []
+        parts.append(f"Backend selected: {backend or 'whisper'}")
+        parts.append(f"Model selected: {selected_model}")
+        parts.append("✓ Canary cache found" if cached else "• Canary cache not found (will download on first use)")
+        parts.append('Install backend: `pip install -e ".[canary]"`')
+
+        if getattr(self, "_nemo_status_label", None):
+            self._nemo_status_label.configure(text="\n".join(parts))
+
+    def _cache_canary_model(self) -> None:
+        """Trigger NeMo to download/cache the Canary checkpoint."""
+        try:
+            from ..stt.canary_engine import CanaryQwenEngine
+
+            eng = CanaryQwenEngine(model="nvidia/canary-qwen-2.5b", device="cuda", language="en")
+            eng.preload()
+            messagebox.showinfo("Cached", "Canary-Qwen-2.5B is cached and ready.")
+        except Exception as exc:
+            messagebox.showerror("Error", f"Failed to cache Canary model:\n\n{exc}")
+        finally:
+            self._refresh_nemo_models()
+
+    def _update_model_info(self) -> None:
         model_name = self.var_download_model.get()
         info = self.model_manager.get_model_info(model_name)
-        
         if info:
-            text = (
-                f"{info.description}\n"
-                f"Size: {info.size_mb}MB | Parameters: {info.parameters} | "
-                f"Speed: {info.relative_speed} | Accuracy: {info.accuracy}"
-            )
-            self.model_info_label.configure(text=text)
-    
-    def _download_selected_model(self):
-        """Download the selected model."""
+            self.model_info_label.configure(text=(
+                f"{info.description}  —  "
+                f"{info.size_mb} MB  |  {info.parameters}  |  "
+                f"Speed: {info.relative_speed}  |  Accuracy: {info.accuracy}"
+            ))
+
+    def _download_selected_model(self) -> None:
         model_name = self.var_download_model.get()
-        
-        def progress_callback(message):
-            # Update UI with progress (could show in a dialog)
-            print(f"[Model Download] {message}")
-        
-        # Download in background (should use threading in production)
-        success = self.model_manager.download_model(model_name, progress_callback)
-        
+        success = self.model_manager.download_model(model_name, lambda _msg: None)
         if success:
-            messagebox.showinfo("Success", f"Model {model_name} downloaded successfully!")
+            messagebox.showinfo("Downloaded", f"Model '{model_name}' is ready.")
             self._refresh_installed_models()
         else:
-            messagebox.showerror("Error", f"Failed to download model {model_name}")
-    
-    def _open_model_folder(self):
-        """Open the model directory in file explorer."""
-        success = self.model_manager.open_model_directory()
-        if not success:
-            messagebox.showwarning("Warning", "Could not open model directory")
-    
-    def _test_models(self):
-        """Test all installed models."""
+            messagebox.showerror("Error", f"Failed to download '{model_name}'.")
+
+    def _open_model_folder(self) -> None:
+        if not self.model_manager.open_model_directory():
+            messagebox.showwarning("Warning", "Could not open model directory.")
+
+    def _test_models(self) -> None:
         installed = self.model_manager.list_installed_models()
-        
         if not installed:
-            messagebox.showinfo("No Models", "No models installed to test")
+            messagebox.showinfo("No Models", "No models installed to test.")
             return
-        
         model_names = [m.name for m in installed]
-        
-        # Update text widget
         self.test_results_text.configure(state=tk.NORMAL)
         self.test_results_text.delete(1.0, tk.END)
-        self.test_results_text.insert(tk.END, "Testing models, please wait...\n")
+        self.test_results_text.insert(tk.END, "Testing models, please wait…\n")
         self.test_results_text.configure(state=tk.DISABLED)
         self.test_results_text.update()
-        
-        def progress_callback(message):
+
+        def _progress(message: str) -> None:
             self.test_results_text.configure(state=tk.NORMAL)
             self.test_results_text.insert(tk.END, f"{message}\n")
             self.test_results_text.configure(state=tk.DISABLED)
             self.test_results_text.update()
-        
-        # Run tests
+
         results = self.model_tester.test_all_models(
             model_names,
             device=self.cfgm.config.stt.device,
             compute_type=self.cfgm.config.stt.compute_type,
-            progress_callback=progress_callback
+            progress_callback=_progress,
         )
-        
-        # Display results
-        results_table = self.model_tester.format_results_table(results)
-        
+        table = self.model_tester.format_results_table(results)
         self.test_results_text.configure(state=tk.NORMAL)
         self.test_results_text.delete(1.0, tk.END)
-        self.test_results_text.insert(tk.END, results_table)
+        self.test_results_text.insert(tk.END, table)
         self.test_results_text.configure(state=tk.DISABLED)
 
-    def _create_modern_combobox(self, parent, textvariable=None, values=None, width=30):
-        """Create a modern styled dropdown."""
-        dropdown = ModernDropdown(
-            parent,
-            textvariable=textvariable,
-            values=values or [],
-            width=width
-        )
-        return dropdown
+    # ------------------------------------------------------------------
+    # Save / reset / animate
+    # ------------------------------------------------------------------
 
-    def _minimize_window(self) -> None:
-        """Minimize the settings window."""
-        if self.win:
-            self.win.withdraw()
-    
-    def _cancel(self) -> None:
-        """Cancel any changes and restore original config."""
-        if self._original_config is not None:
-            # Restore the original config
-            self.cfgm.config = self._original_config
-            self.cfgm.save()
-            print("[SettingsWindow] Changes cancelled, original config restored")
-        
-        # Close the window
-        if self.win:
-            self.win.destroy()
-    
-    def _animate_fade_in(self) -> None:
-        """Animate window fade-in effect."""
-        if not self.win:
+    def _reset_to_defaults(self) -> None:
+        """Restore config to factory defaults after confirmation."""
+        if not messagebox.askyesno(
+            "Reset to Defaults",
+            "This will reset ALL settings to their defaults.\nContinue?",
+        ):
             return
-        
-        steps = 15
-        target_alpha = self.cfgm.config.ui.settings_window_opacity
-        
-        def fade_step(current_step):
-            if not self.win or current_step > steps:
-                return
-            
-            alpha = (current_step / steps) * target_alpha
-            try:
-                self.win.attributes('-alpha', alpha)
-            except:
-                pass
-            
-            if current_step < steps:
-                self.win.after(20, lambda: fade_step(current_step + 1))
-        
-        try:
-            self.win.attributes('-alpha', 0.0)
-            fade_step(0)
-        except:
-            # Fade animation not supported
-            pass
+        from ..config.schema import AppConfig
+        defaults = AppConfig()
+        self.cfgm.config = defaults
+        self.cfgm.save()
+        self._show_status("✓  Reset to defaults — please reopen Settings", ColorTheme.ACCENT_SUCCESS)
+        if self.win:
+            self.win.after(1200, self.win.destroy)
 
     def _save(self) -> None:
-        """Save settings with success animation."""
         try:
             hk = self.var_hotkey.get().strip()
+            backend = (getattr(self, "var_backend", None).get().strip() if hasattr(self, "var_backend") else "whisper")
             model = self.var_model.get().strip()
             device = self.var_device.get().strip()
             compute = self.var_compute.get().strip()
+            language = self.var_language.get().strip()
             sr = int(self.var_sr.get())
-            device_id = self.var_device_id.get()
-            
-            if device_id == "default" or device_id == "":
+            device_id_raw = self.var_device_id.get()
+
+            if device_id_raw in ("default", ""):
                 did = None
             else:
-                did = int(device_id.split(":", 1)[0]) if ":" in device_id else int(device_id)
+                did = int(device_id_raw.split(":", 1)[0]) if ":" in device_id_raw else int(device_id_raw)
 
-            # Check if critical settings changed that require restart
-            model_changed = model != self.cfgm.config.stt.model
-            device_changed = device != self.cfgm.config.stt.device
-            compute_changed = compute != self.cfgm.config.stt.compute_type
-            
-            needs_restart = model_changed or device_changed or compute_changed
+            needs_restart = (
+                backend != str(getattr(self.cfgm.config.stt, "backend", "whisper"))
+                or model != self.cfgm.config.stt.model
+                or device != self.cfgm.config.stt.device
+                or compute != self.cfgm.config.stt.compute_type
+            )
 
             self.cfgm.update(
+                # General
                 ui__hotkey=hk,
+                ui__start_minimized=self.var_start_minimized.get(),
+                ui__close_to_tray=self.var_close_to_tray.get(),
+                # Speech
+                stt__backend=backend,
                 stt__model=model,
                 stt__device=device,
                 stt__compute_type=compute,
+                stt__language=language,
                 stt__remove_filler_words=self.var_remove_fillers.get(),
                 stt__improve_grammar=self.var_improve_grammar.get(),
+                # Audio
                 audio__sample_rate=sr,
                 audio__device_id=did,
-                streaming__mode=self.var_stream_mode.get().strip(),
+                vad__method=self.var_vad_method.get().strip(),
+                vad__threshold=float(self.var_vad_threshold.get()),
+                vad__min_speech_duration_ms=int(self.var_vad_min_speech.get()),
+                vad__min_silence_duration_ms=int(self.var_vad_min_silence.get()),
+                # Commands
+                commands__enabled=self.var_commands_enabled.get(),
+                punctuation__mode=self.var_punct_mode.get().strip(),
+                punctuation__auto_capitalize=self.var_auto_capitalize.get(),
+                # Brain / AI
+                brain__enabled=self.var_brain_enabled.get(),
+                brain__endpoint=self.var_brain_endpoint.get().strip(),
+                brain__model=self.var_brain_model.get().strip(),
+                brain__timeout_sec=float(self.var_brain_timeout.get()),
+                brain__intent_routing_enabled=self.var_intent_routing.get(),
+                brain__refinement_enabled=self.var_refinement.get(),
+                brain__context_summarizer_enabled=self.var_context_summarizer.get(),
+                brain__context_window_sec=float(self.var_context_window.get()),
+                # Appearance
+                ui__accent_color_idle=self.var_color_idle.get().strip(),
+                ui__accent_color_recording=self.var_color_recording.get().strip(),
+                ui__accent_color_processing=self.var_color_processing.get().strip(),
+                ui__visualizer_size=int(self.var_visualizer_size.get()),
+                ui__overlay_opacity=float(self.var_overlay_opacity.get()),
+                ui__settings_window_opacity=float(self.var_settings_opacity.get()),
+                # Advanced — streaming
                 streaming__segmentation=self.var_seg.get().strip(),
                 streaming__min_segment_sec=float(self.var_min_seg.get()),
                 streaming__min_silence_sec=float(self.var_min_sil.get()),
                 streaming__energy_threshold=float(self.var_energy.get()),
+                # Advanced — decoding
                 decoding__beam_size=int(self.var_beam.get()),
                 decoding__temperature=float(self.var_temp.get()),
-                ui__accent_color_idle=self.var_color_idle.get().strip(),
-                ui__accent_color_recording=self.var_color_recording.get().strip(),
-                ui__accent_color_processing=self.var_color_processing.get().strip(),
-                ui__settings_window_opacity=float(self.var_settings_opacity.get()),
-                ui__overlay_opacity=float(self.var_overlay_opacity.get()),
-                ui__visualizer_size=int(self.var_visualizer_size.get()),
+                # Advanced — output
+                output__primary_method=self.var_output_method.get().strip(),
+                output__prefer_clipboard_over_chars=int(self.var_prefer_clipboard.get()),
             )
-            
-            # Show success message with restart warning if needed
-            self._show_success_message(needs_restart=needs_restart)
-            
-        except Exception as e:
-            messagebox.showerror("Settings Error", f"Failed to save: {e}")
 
-    def _show_success_message(self, needs_restart: bool = False) -> None:
-        """Show a modern success message.
-        
-        Args:
-            needs_restart: If True, shows prominent restart warning
-        """
-        # Create a custom success dialog
-        success_win = tk.Toplevel(self.win)
-        success_win.title("Success")
-        height = 140 if needs_restart else 120
-        success_win.geometry(f"360x{height}")
-        success_win.configure(bg=ColorTheme.BG_DARK)
-        success_win.transient(self.win)
-        success_win.grab_set()
-        
-        # Center on parent
-        if self.win:
-            x = self.win.winfo_x() + (self.win.winfo_width() - 360) // 2
-            y = self.win.winfo_y() + (self.win.winfo_height() - height) // 2
-            success_win.geometry(f"+{x}+{y}")
-        
-        # Remove window decorations
-        success_win.overrideredirect(True)
-        
-        # Make it appear above settings window
+            if needs_restart:
+                self._show_status(
+                    "✓  Saved — restart required for model/device changes",
+                    '#f59e0b',
+                )
+            else:
+                self._show_status("✓  All changes saved", ColorTheme.ACCENT_SUCCESS)
+
+        except Exception as exc:
+            messagebox.showerror("Settings Error", f"Failed to save: {exc}")
+
+    def _animate_fade_in(self) -> None:
+        if not self.win:
+            return
+        target_alpha = self.cfgm.config.ui.settings_window_opacity
+        steps = 15
+
+        def _step(n: int) -> None:
+            if not self.win or n > steps:
+                return
+            try:
+                self.win.attributes('-alpha', (n / steps) * target_alpha)
+            except Exception:
+                pass
+            if n < steps:
+                self.win.after(20, lambda: _step(n + 1))
+
         try:
-            success_win.attributes('-topmost', True)
-        except:
+            self.win.attributes('-alpha', 0.0)
+            _step(0)
+        except Exception:
             pass
-        
-        # Success icon and message
-        frame = ttk.Frame(success_win, style='Modern.TFrame')
-        frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-        
-        icon_label = ttk.Label(
-            frame,
-            text="✓",
-            style='Title.TLabel',
-            font=('Segoe UI', 32),
-            foreground=ColorTheme.ACCENT_SUCCESS
-        )
-        icon_label.pack(pady=(10, 5))
-        
-        msg_label = ttk.Label(
-            frame,
-            text="Settings saved successfully!",
-            style='Modern.TLabel'
-        )
-        msg_label.pack()
-        
-        if needs_restart:
-            # Prominent restart warning
-            restart_label = ttk.Label(
-                frame,
-                text="⚠ RESTART REQUIRED",
-                style='Modern.TLabel',
-                font=('Segoe UI', 10, 'bold'),
-                foreground='#f59e0b'  # Orange warning color
-            )
-            restart_label.pack(pady=(8, 2))
-            
-            hint_label = ttk.Label(
-                frame,
-                text="Model/device changes require app restart",
-                style='Modern.TLabel',
-                font=('Segoe UI', 8),
-                foreground=ColorTheme.TEXT_SECONDARY
-            )
-            hint_label.pack(pady=(0, 0))
-        else:
-            hint_label = ttk.Label(
-                frame,
-                text="Some changes may require restart",
-                style='Modern.TLabel',
-                font=('Segoe UI', 8),
-                foreground=ColorTheme.TEXT_SECONDARY
-            )
-            hint_label.pack(pady=(5, 0))
-        
-        # Auto-close after 3 seconds (longer if restart needed)
-        close_delay = 3500 if needs_restart else 2000
-        success_win.after(close_delay, success_win.destroy)
+
+    # ------------------------------------------------------------------
+    # Show
+    # ------------------------------------------------------------------
 
     def _show_impl(self) -> None:
-        """Show the settings window implementation."""
-        print("[SettingsWindow] Show requested")
-        
-        # Take a snapshot of the config for cancel functionality
-        import copy
         self._original_config = copy.deepcopy(self.cfgm.config)
-        
+
         if self.root is None:
-            print("[SettingsWindow] Creating root")
             self.root = tk.Tk()
             self.root.withdraw()
-        
+
         if self.win is not None and tk.Toplevel.winfo_exists(self.win):
-            print("[SettingsWindow] Deiconify existing window")
             self.win.deiconify()
             self.win.lift()
             self.win.focus_force()
             self.win.update_idletasks()
             return
-        
-        print("[SettingsWindow] Creating Toplevel")
+
         self.win = tk.Toplevel(self.root)
         self._build()
-        
+
         try:
             self.win.attributes('-topmost', True)
         except Exception:
             pass
-        
+
         self.win.update_idletasks()
         self.win.deiconify()
         self.win.lift()
         self.win.focus_force()
-        print("[SettingsWindow] Shown")
 
     def show(self) -> None:
-        """Show the settings window."""
-        # Always marshal to Tk main thread
         if self.root is not None:
             try:
                 self.root.after(0, self._show_impl)
                 return
             except Exception:
                 pass
-        # Fallback (should not happen if root exists)
         self._show_impl()

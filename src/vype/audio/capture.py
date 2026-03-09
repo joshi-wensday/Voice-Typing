@@ -1,15 +1,19 @@
 """Audio capture utilities using sounddevice.
 
-Provides device enumeration and start/stop recording with a streaming buffer.
+Provides device enumeration and start/stop recording with a streaming buffer,
+plus a Silero VAD pre-segmenter that only forwards confirmed speech frames.
 """
 
 from __future__ import annotations
 
+import logging
 import threading
-from typing import Any
+from typing import Any, Generator, Optional
 
 import numpy as np
 import sounddevice as sd
+
+logger = logging.getLogger(__name__)
 
 
 class AudioCapture:
@@ -173,3 +177,237 @@ class AudioCapture:
         """
         with self._chunk_lock:
             return self._latest_chunk.copy() if self._latest_chunk.size > 0 else np.zeros(0, dtype=np.float32)
+
+
+class SileroVADSegmenter:
+    """Pre-segments incoming audio into confirmed speech chunks using Silero VAD.
+
+    Silero VAD is a lightweight ONNX neural network that runs in real-time and
+    distinguishes speech from silence/noise far more reliably than energy thresholds.
+
+    Usage pattern:
+        segmenter = SileroVADSegmenter(sample_rate=16000)
+        for speech_chunk in segmenter.iter_segments(audio_capture):
+            text = whisper.transcribe(speech_chunk)
+
+    The model is downloaded on first use via torch.hub and cached locally.
+    Requires: torch or onnxruntime (see pyproject.toml [v2] extras)
+    """
+
+    # Silero VAD operates on 512 samples at 16kHz (32ms windows)
+    _WINDOW_SIZE_16K = 512
+    _WINDOW_SIZE_8K = 256
+
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        threshold: float = 0.4,
+        min_speech_duration_ms: int = 250,
+        min_silence_duration_ms: int = 800,
+        max_segment_sec: float = 10.0,
+    ) -> None:
+        """Initialise the Silero VAD segmenter.
+
+        Args:
+            sample_rate: Audio sample rate (8000 or 16000)
+            threshold: VAD confidence threshold [0, 1]. Higher = less sensitive.
+            min_speech_duration_ms: Minimum speech duration to emit a segment.
+            min_silence_duration_ms: Silence gap that triggers end-of-segment.
+                800ms is the sweet spot — short enough to feel responsive, long
+                enough not to cut on natural mid-sentence pauses (300-500ms).
+            max_segment_sec: Force a segment after this many seconds of continuous
+                speech even if silence never arrives. Prevents unbounded accumulation
+                during long unbroken utterances.
+        """
+        if sample_rate not in (8000, 16000):
+            raise ValueError("Silero VAD only supports 8000 or 16000 Hz")
+
+        self.sample_rate = sample_rate
+        self.threshold = threshold
+        self.min_speech_samples = int(min_speech_duration_ms * sample_rate / 1000)
+        self.min_silence_samples = int(min_silence_duration_ms * sample_rate / 1000)
+        self.max_speech_samples = int(max_segment_sec * sample_rate)
+        self._window_size = self._WINDOW_SIZE_16K if sample_rate == 16000 else self._WINDOW_SIZE_8K
+
+        self._model: Optional[Any] = None
+        self._model_utils: Optional[Any] = None
+        self._lock = threading.Lock()
+        self._load_attempted: bool = False  # only try once; avoids per-chunk retry spam
+
+        # Persistent cross-chunk VAD state — must survive between process_chunk calls
+        self._speech_buf: list[np.ndarray] = []
+        self._speech_samples: int = 0
+        self._silence_samples: int = 0
+        self._in_speech: bool = False
+
+    def _load_model(self) -> None:
+        """Load Silero VAD via torch.hub (downloads on first call, cached after)."""
+        try:
+            import torch  # type: ignore[import-untyped]
+            model, utils = torch.hub.load(  # type: ignore[attr-defined]
+                repo_or_dir="snakers4/silero-vad",
+                model="silero_vad",
+                force_reload=False,
+                onnx=False,
+                trust_repo=True,
+            )
+            self._model = model
+            self._model_utils = utils
+            logger.info("Silero VAD model loaded (torch backend)")
+        except Exception as exc:
+            logger.warning("Failed to load Silero VAD via torch.hub: %s — falling back to energy VAD", exc)
+            self._model = None
+
+    def is_available(self) -> bool:
+        """Return True if the VAD model loaded successfully.
+
+        Only attempts to load once — subsequent calls return the cached result
+        immediately without re-trying, preventing per-chunk log spam on failure.
+        """
+        if not self._load_attempted:
+            with self._lock:
+                if not self._load_attempted:
+                    self._load_model()
+                    self._load_attempted = True
+        return self._model is not None
+
+    def _vad_probability(self, window: np.ndarray) -> float:
+        """Run the VAD model on a single window and return speech probability."""
+        try:
+            import torch  # type: ignore[import-untyped]
+            tensor = torch.from_numpy(window).unsqueeze(0)  # type: ignore[attr-defined]
+            with torch.no_grad():  # type: ignore[attr-defined]
+                prob = self._model(tensor, self.sample_rate).item()  # type: ignore[union-attr]
+            return float(prob)
+        except Exception as exc:
+            logger.debug("VAD inference error: %s", exc)
+            return 0.0
+
+    def reset(self) -> None:
+        """Clear accumulated VAD state. Call at the start of each recording session."""
+        self._speech_buf = []
+        self._speech_samples = 0
+        self._silence_samples = 0
+        self._in_speech = False
+
+    def flush(self) -> Generator[np.ndarray, None, None]:
+        """Yield whatever speech has accumulated but not yet been emitted.
+
+        Call this when recording stops to ensure the final utterance is not lost,
+        even if the user stopped speaking before the silence threshold was reached.
+        """
+        if self._speech_buf and self._speech_samples >= self.min_speech_samples:
+            # Trim any trailing silence frames
+            if self._silence_samples > 0:
+                trim = self._silence_samples // self._window_size
+                trimmed = self._speech_buf[:-trim] if trim < len(self._speech_buf) else self._speech_buf
+            else:
+                trimmed = self._speech_buf
+            if trimmed:
+                segment = np.concatenate(trimmed).astype(np.float32)
+                if segment.size >= self.min_speech_samples:
+                    yield segment
+        self.reset()
+
+    def process_chunk(self, audio: np.ndarray) -> Generator[np.ndarray, None, None]:
+        """Feed one audio chunk into the stateful VAD and yield completed speech segments.
+
+        State (speech/silence accumulation) persists across calls so that speech
+        spanning multiple chunks is assembled correctly before being emitted.
+
+        Args:
+            audio: 1-D float32 mono audio array from AudioCapture.drain_buffer()
+
+        Yields:
+            Complete speech segment arrays ready for Whisper transcription.
+            A segment is emitted only after min_silence_duration_ms of silence
+            follows at least min_speech_duration_ms of speech.
+        """
+        if not self.is_available():
+            # Graceful fallback: accumulate raw audio across chunks and yield when
+            # max_segment_sec is reached, using instance state so chunks aren't lost.
+            self._speech_buf.append(audio)
+            self._speech_samples += audio.size
+            if self._speech_samples >= self.max_speech_samples:
+                segment = np.concatenate(self._speech_buf).astype(np.float32)
+                self._speech_buf = []
+                self._speech_samples = 0
+                yield segment
+            return
+
+        yield from self._process_windows(audio)
+
+    def _process_windows(self, audio: np.ndarray) -> Generator[np.ndarray, None, None]:
+        """Run VAD on each 512-sample window, updating persistent cross-chunk state."""
+        # Pad to a multiple of the window size
+        pad = (-len(audio)) % self._window_size
+        if pad:
+            audio = np.concatenate([audio, np.zeros(pad, dtype=np.float32)])
+
+        for window in audio.reshape(-1, self._window_size):
+            prob = self._vad_probability(window)
+            is_speech = prob >= self.threshold
+
+            if is_speech:
+                self._speech_buf.append(window)
+                self._speech_samples += self._window_size
+                self._silence_samples = 0
+                self._in_speech = True
+
+                # Hard cap: force segment if speech has gone on too long without pause
+                if self._speech_samples >= self.max_speech_samples:
+                    segment = np.concatenate(self._speech_buf).astype(np.float32)
+                    logger.debug("VAD max_segment cap hit (%ds) — forcing transcription", self.max_speech_samples // self.sample_rate)
+                    yield segment
+                    self.reset()
+
+            elif self._in_speech:
+                self._silence_samples += self._window_size
+                self._speech_buf.append(window)  # keep trailing silence temporarily
+
+                if self._silence_samples >= self.min_silence_samples:
+                    # Trim the trailing silence frames we buffered
+                    trim = self._silence_samples // self._window_size
+                    trimmed = self._speech_buf[:-trim] if trim < len(self._speech_buf) else self._speech_buf
+                    if trimmed:
+                        segment = np.concatenate(trimmed).astype(np.float32)
+                        if segment.size >= self.min_speech_samples:
+                            yield segment
+                    self.reset()
+
+    def iter_segments(
+        self,
+        capture: AudioCapture,
+        poll_interval: float = 0.05,
+        stop_event: Optional[threading.Event] = None,
+    ) -> Generator[np.ndarray, None, None]:
+        """Continuously drain AudioCapture and yield VAD-confirmed speech segments.
+
+        Maintains stateful VAD accumulation across chunks so that speech spanning
+        multiple drain cycles is assembled correctly. Calls flush() at the end to
+        emit any final utterance that hadn't yet hit the silence threshold.
+
+        Args:
+            capture: Active AudioCapture instance
+            poll_interval: Seconds to sleep when the capture buffer is empty
+            stop_event: When set, the generator drains remaining audio and exits
+
+        Yields:
+            Speech segment numpy arrays suitable for Whisper transcription
+        """
+        import time
+
+        while stop_event is None or not stop_event.is_set():
+            chunk = capture.drain_buffer()
+            if chunk.size > 0:
+                yield from self.process_chunk(chunk)
+            else:
+                time.sleep(poll_interval)
+
+        # Drain any audio still in the capture buffer after stop
+        chunk = capture.drain_buffer()
+        if chunk.size > 0:
+            yield from self.process_chunk(chunk)
+
+        # Flush VAD-internal accumulated speech that never hit a silence boundary
+        yield from self.flush()

@@ -1,4 +1,4 @@
-# Voice Typing Configuration File
+# Voice Typing Configuration File (V2 - Layered Intelligence)
 # Copy to ~/.voice-typing/config.yaml and adjust as needed
 # Edit this file directly or use the Settings UI (right-click overlay)
 
@@ -6,28 +6,36 @@
 # Speech-to-Text Engine Configuration
 # ============================================================================
 stt:
-  # Model size affects accuracy and speed
+  # Backend implementation
+  # whisper: faster-whisper (default)
+  # nemo: NVIDIA NeMo (required for canary-qwen-2.5b)
+  backend: whisper
+
+  # V2 default: large-v3 on CUDA for maximum accuracy
+  # canary-qwen-2.5b: NVIDIA Canary-Qwen-2.5B via NeMo (English-only, with punctuation/caps)
+  #   Install: pip install "vype[canary]"  (see pyproject optional extras)
   # tiny: fastest, lowest accuracy (39M params)
-  # base: recommended for most users (74M params) 
+  # base: good for CPU-only machines (74M params) 
   # small: better accuracy, slower (244M params)
   # medium: high accuracy, requires GPU (769M params)
-  # large-v2/large-v3: best accuracy, requires GPU (1550M params)
-  model: base
+  # large-v2/large-v3: best accuracy, requires NVIDIA GPU with CUDA
+  model: large-v3
   
   # Device for inference
+  # cuda: V2 default — requires NVIDIA GPU with CUDA drivers installed
   # auto: automatically select GPU if available, fallback to CPU
-  # cuda: force GPU (requires NVIDIA GPU with CUDA)
-  # cpu: force CPU (slower but works on any hardware)
-  device: auto
+  # cpu: force CPU (significantly slower, use small/base model)
+  device: cuda
   
   # Language for transcription (en = English)
   # For other languages, use ISO 639-1 codes (es, fr, de, etc.)
   language: en
   
   # Compute precision
-  # float16: fastest on GPU, may not work on CPU
-  # float32: compatible with all devices, slower
-  # int8: smallest memory, fastest, lower accuracy
+  # float16: max quality, ~3.1GB VRAM (recommended for RTX 3080 and later)
+  # int8_float16: int8 weights + float16 activations, ~1.6GB VRAM (use if VRAM is tight)
+  # float32: CPU-compatible, slowest
+  # int8: CPU-only
   compute_type: float16
 
 # ============================================================================
@@ -44,12 +52,64 @@ audio:
   # Number of audio channels (1 = mono, 2 = stereo)
   channels: 1
   
-  # Audio chunk duration in seconds
-  chunk_duration: 0.5
+  # V2: smaller chunks for lower VAD latency (0.1s = 100ms callbacks)
+  chunk_duration: 0.1
+
+# ============================================================================
+# Voice Activity Detection (V2 - Silero VAD)
+# ============================================================================
+vad:
+  # Enable Silero VAD pre-segmentation (strongly recommended)
+  # When enabled, only confirmed speech frames are sent to Whisper
+  enabled: true
   
-  # Voice Activity Detection (experimental)
-  vad_enabled: false
-  vad_aggressiveness: 2  # 0-3, higher = more aggressive
+  # VAD backend: silero (neural, recommended) or energy (legacy fallback)
+  method: silero
+  
+  # Speech probability threshold [0.0-1.0]
+  # Higher = less sensitive (misses quiet speech)
+  # Lower = more sensitive (may include background noise)
+  threshold: 0.4
+  
+  # Minimum speech duration to start a segment (ms)
+  min_speech_duration_ms: 250
+  
+  # Silence gap that ends a segment (ms)
+  # 800ms is the sweet spot — long enough to survive natural mid-sentence
+  # pauses (300-500ms) without cutting the utterance short and forcing
+  # Whisper to guess the final word from an incomplete phrase.
+  min_silence_duration_ms: 800
+
+# ============================================================================
+# Brain Layer (V2 - Ollama LLM)
+# ============================================================================
+brain:
+  # Enable the Ollama brain layer (requires Ollama running locally)
+  # Install Ollama: https://ollama.ai
+  # Pull model: ollama pull llama3.2
+  enabled: true
+  
+  # Ollama server endpoint
+  endpoint: http://localhost:11434
+  
+  # LLM model for intent routing and refinement
+  # Recommended: llama3.2 (fast) or llama4-scout (higher quality)
+  model: llama3.2
+  
+  # Timeout for LLM calls in seconds
+  # Increase if you have a slower GPU or large model
+  timeout_sec: 10.0
+  
+  # Rolling context window for keyword summarization (seconds)
+  context_window_sec: 120.0
+  
+  # Maximum keywords in the Whisper initial_prompt
+  context_max_keywords: 50
+  
+  # Feature toggles
+  intent_routing_enabled: true   # Classify TRANSCRIPT / COMMAND / REFACTOR
+  refinement_enabled: true       # LLM grammar cleaning via Refiner skill
+  context_summarizer_enabled: true  # Rolling keyword injection into Whisper
 
 # ============================================================================
 # Punctuation Handling
@@ -176,25 +236,21 @@ output:
 # Streaming and Segmentation
 # ============================================================================
 streaming:
-  # Streaming mode (future: semi_streaming for partial results)
+  # Streaming mode
   mode: final_only
   
   # Segmentation method
-  # energy: Silence detection based on audio energy
-  # vad: Voice Activity Detection (future)
-  segmentation: energy
+  # vad: Silero VAD (V2 default — uses vad: section above)
+  # energy: Legacy energy-threshold fallback
+  segmentation: vad
   
-  # Minimum segment length in seconds
-  # Shorter = more responsive, but more frequent processing
-  min_segment_sec: 1.2
+  # Minimum segment length in seconds (used for energy fallback only)
+  min_segment_sec: 0.5
   
-  # Minimum silence duration to trigger segment finalization
-  # Shorter = more responsive, may cut off mid-sentence
-  min_silence_sec: 0.6
+  # Minimum silence to finalize segment (used for energy fallback only)
+  min_silence_sec: 0.4
   
-  # Energy threshold for silence detection (0.0 - 1.0)
-  # Lower = more sensitive to silence
-  # Adjust if transcription segments too early or too late
+  # Energy threshold for silence (used only when segmentation: energy)
   energy_threshold: 0.015
 
 # ============================================================================
@@ -211,8 +267,19 @@ decoding:
   # Higher values increase randomness
   temperature: 0.0
   
-  # Use previous transcription as context (improves coherence)
-  condition_on_previous_text: true
+  # Do NOT condition on previous text — this is the primary guard against
+  # Whisper echoing its own previous output as hallucinated repetitions.
+  condition_on_previous_text: false
+
+  # Discard segments whose average token log-probability falls below this.
+  # -1.0 accepts everything; -0.4 filters out low-confidence guesses.
+  log_prob_threshold: -0.4
+
+  # Beam search patience multiplier (1.0 = standard, 2.0 = explore more candidates)
+  patience: 2.0
+
+  # Penalise repeated tokens — reduces n-gram repetition loops (1.0 = off)
+  repetition_penalty: 1.1
 
 # ============================================================================
 # Logging Configuration

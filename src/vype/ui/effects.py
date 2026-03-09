@@ -375,11 +375,14 @@ class ColorTheme:
     BG_DARK = '#1a1a2e'
     BG_DARKER = '#16213e'
     BG_CARD = '#0f172a'
+    BG_CARD_RAISED = '#1e2a3a'   # Card surface — slightly lighter than BG_CARD
+    BG_SIDEBAR = '#111827'        # Sidebar background — deepest layer
     
     ACCENT_PRIMARY = '#8b5cf6'    # Purple
     ACCENT_SECONDARY = '#3b82f6'  # Blue
     ACCENT_SUCCESS = '#10b981'    # Green
     ACCENT_ERROR = '#ef4444'      # Red
+    ACTIVE_NAV = '#7c3aed'        # Sidebar active item accent
     
     TEXT_PRIMARY = '#f1f5f9'
     TEXT_SECONDARY = '#94a3b8'
@@ -387,6 +390,7 @@ class ColorTheme:
     
     BORDER = '#334155'
     BORDER_LIGHT = '#475569'
+    CARD_BORDER = '#2d3f55'       # Card outline — slightly lighter than BORDER
     
     # Gradients for buttons
     BUTTON_GRADIENT_START = '#8b5cf6'
@@ -398,6 +402,26 @@ class ColorTheme:
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+def create_card_frame(parent: tk.Widget, **kwargs) -> tk.Frame:
+    """Return a styled card Frame matching the dark-theme card aesthetic.
+
+    Args:
+        parent: Parent widget.
+        **kwargs: Additional keyword arguments forwarded to tk.Frame.
+
+    Returns:
+        A tk.Frame configured with raised card background and border.
+    """
+    defaults = dict(
+        bg=ColorTheme.BG_CARD_RAISED,
+        bd=0,
+        highlightthickness=1,
+        highlightbackground=ColorTheme.CARD_BORDER,
+    )
+    defaults.update(kwargs)
+    return tk.Frame(parent, **defaults)
+
 
 def create_rounded_rectangle(
     canvas: tk.Canvas,
