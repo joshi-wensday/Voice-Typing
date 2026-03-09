@@ -313,8 +313,18 @@ class SettingsWindow:
             fieldbackground=ColorTheme.BG_CARD,
             background=ColorTheme.BG_CARD,
             foreground=ColorTheme.TEXT_PRIMARY,
+            selectbackground=ColorTheme.ACCENT_PRIMARY,
+            selectforeground=ColorTheme.TEXT_PRIMARY,
             arrowcolor=ColorTheme.TEXT_PRIMARY,
             borderwidth=1, relief=tk.FLAT,
+            padding=(6, 4),
+        )
+        style.map(
+            'Modern.TCombobox',
+            fieldbackground=[('readonly', ColorTheme.BG_CARD), ('disabled', ColorTheme.BG_DARKER)],
+            foreground=[('readonly', ColorTheme.TEXT_PRIMARY), ('disabled', ColorTheme.TEXT_SECONDARY)],
+            selectbackground=[('readonly', ColorTheme.ACCENT_PRIMARY)],
+            selectforeground=[('readonly', ColorTheme.TEXT_PRIMARY)],
         )
         style.configure(
             'Modern.TCheckbutton',
@@ -347,6 +357,15 @@ class SettingsWindow:
 
         self._apply_dark_titlebar()
         self._setup_modern_style()
+
+        # Style the popup listbox that appears when a combobox is opened.
+        # These option_add calls must be done on the window (not the style engine)
+        # because ttk doesn't expose the dropdown list colours through its style API.
+        self.win.option_add('*TCombobox*Listbox.background',        ColorTheme.BG_CARD)
+        self.win.option_add('*TCombobox*Listbox.foreground',        ColorTheme.TEXT_PRIMARY)
+        self.win.option_add('*TCombobox*Listbox.selectBackground',  ColorTheme.ACCENT_PRIMARY)
+        self.win.option_add('*TCombobox*Listbox.selectForeground',  ColorTheme.TEXT_PRIMARY)
+        self.win.option_add('*TCombobox*Listbox.relief',            'flat')
 
         # ── Outer shell: sidebar + content stacked above footer ──────────
         outer = tk.Frame(self.win, bg=ColorTheme.BG_DARK)
@@ -564,7 +583,7 @@ class SettingsWindow:
         row = tk.Frame(parent, bg=ColorTheme.BG_CARD_RAISED)
         row.pack(fill=tk.X, pady=5)
 
-        lbl_col = tk.Frame(row, bg=ColorTheme.BG_CARD_RAISED, width=190)
+        lbl_col = tk.Frame(row, bg=ColorTheme.BG_CARD_RAISED, width=230)
         lbl_col.pack(side=tk.LEFT)
         lbl_col.pack_propagate(False)
         tk.Label(
@@ -575,7 +594,7 @@ class SettingsWindow:
             tk.Label(
                 lbl_col, text=help_text, bg=ColorTheme.BG_CARD_RAISED,
                 fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 8),
-                wraplength=165, anchor="w", justify="left",
+                wraplength=205, anchor="w", justify="left",
             ).pack(anchor="w")
 
         widget_col = tk.Frame(row, bg=ColorTheme.BG_CARD_RAISED)
@@ -916,7 +935,11 @@ class SettingsWindow:
             fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 9),
         ).pack(side=tk.LEFT, padx=(0, 8))
         self.var_hf_url = tk.StringVar()
-        ModernEntry(hf_row, textvariable=self.var_hf_url, width=32).pack(side=tk.LEFT)
+        ModernEntry(hf_row, textvariable=self.var_hf_url, width=28).pack(side=tk.LEFT, padx=(0, 8))
+        ModernButton(
+            hf_row, text="Download", command=self._download_from_hf_url,
+            width=110, height=30, primary=True,
+        ).pack(side=tk.LEFT)
 
         # ── Manual install card ────────────────────────────────────────
         body3 = self._make_card(panel, "Manual Installation")
@@ -1102,6 +1125,35 @@ class SettingsWindow:
             self._refresh_installed_models()
         else:
             messagebox.showerror("Error", f"Failed to download '{model_name}'.")
+
+    def _download_from_hf_url(self) -> None:
+        """Download a model from a HuggingFace URL or model ID entered by the user."""
+        raw = self.var_hf_url.get().strip()
+        if not raw:
+            messagebox.showwarning("Input Required", "Please enter a HuggingFace URL or model ID.")
+            return
+
+        # Accept both full URLs (https://huggingface.co/org/model) and bare IDs (org/model)
+        import re as _re
+        m = _re.search(r"huggingface\.co/([^/\s?#]+/[^/\s?#]+)", raw)
+        if m:
+            model_id = m.group(1)
+        elif "/" in raw and not raw.startswith("http"):
+            model_id = raw
+        else:
+            messagebox.showerror(
+                "Invalid Input",
+                "Enter a HuggingFace model ID (e.g. 'nvidia/canary-1b') "
+                "or a full HuggingFace URL.",
+            )
+            return
+
+        success = self.model_manager.download_model(model_id, lambda _msg: None)
+        if success:
+            messagebox.showinfo("Downloaded", f"Model '{model_id}' is ready.")
+            self._refresh_installed_models()
+        else:
+            messagebox.showerror("Error", f"Failed to download '{model_id}'.")
 
     def _open_model_folder(self) -> None:
         if not self.model_manager.open_model_directory():

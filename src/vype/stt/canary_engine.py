@@ -58,6 +58,27 @@ def _apply_itn(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Model name helpers
+# ---------------------------------------------------------------------------
+
+_SHORT_MODEL_NAMES: dict[str, str] = {
+    "canary-qwen-2.5b": "nvidia/canary-qwen-2.5b",
+    "canary-1b":        "nvidia/canary-1b",
+    "canary-1b-flash":  "nvidia/canary-1b-flash",
+    "canary-1b-v2":     "nvidia/canary-1b-v2",
+}
+
+
+def _normalise_model_name(name: str) -> str:
+    """Accept short names (e.g. 'canary-qwen-2.5b') and return the full HF ID.
+
+    Old config.yaml files may contain the short form.  This allows the engine
+    to work without requiring the user to manually edit their config.
+    """
+    return _SHORT_MODEL_NAMES.get(name.strip().lower(), name)
+
+
+# ---------------------------------------------------------------------------
 # Audio helpers
 # ---------------------------------------------------------------------------
 
@@ -123,7 +144,7 @@ class CanaryQwenEngine:
         enable_pnc: bool = True,
         context_tail_chars: int = 400,
     ) -> None:
-        self.model_name = model
+        self.model_name = _normalise_model_name(model)
         self.device = device
         self.language = str(language) if language else "en"
         self.max_new_tokens = max_new_tokens
@@ -171,7 +192,7 @@ class CanaryQwenEngine:
 
     def load_model(self, model_name: str) -> None:
         """Hot-swap model at runtime."""
-        self.model_name = model_name
+        self.model_name = _normalise_model_name(model_name)
         self._model = None
         self.preload()
 
