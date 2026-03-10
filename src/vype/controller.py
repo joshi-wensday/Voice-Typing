@@ -188,14 +188,15 @@ class VoiceTypingController:
             if self._stop_stream.is_set():
                 break
             self.state.processing = True
-            self._set_status("processing")
+            # Don't change the overlay state to "processing" — the mic is still
+            # listening and the "processing" animation is confusing while recording.
+            # The output window shows its own refinement status independently.
             try:
                 self._process_segment(segment)
             except Exception as exc:
                 logger.error("Segment error: %s", exc, exc_info=True)
             finally:
                 self.state.processing = False
-                self._set_status("recording" if self.state.recording else "idle")
 
     def _process_segment(self, segment: np.ndarray) -> None:
         """Core pipeline: RMS gate → Canary → command check → type."""
@@ -213,23 +214,28 @@ class VoiceTypingController:
             sample_rate=sr,
             initial_prompt=self._typed_tail[-self.cfg.config.stt.context_tail_chars:] or None,
         )
-        if not text:
-            return
 
         logger.debug("STT → %r", text)
 
-        # 3. Command check → dispatch or type
-        tool = _regex_command(text)
+        # 3. Command check (needed before we decide what draft text to show)
+        tool = _regex_command(text) if text else None
+
+        # 4. Feed to progressive transcriber — ALWAYS, even if text is empty.
+        #    This ensures every speech segment is in the audio buffer for refinement
+        #    passes, even when the model failed to produce output for that segment.
+        if self.progressive is not None:
+            draft = text if text and not tool else ""
+            self.progressive.add_segment(segment, draft)
+
+        if not text:
+            return
+
+        # 5. Dispatch command or type transcribed text
         if tool:
             logger.debug("Command: %s", tool)
             self._dispatch_command(tool)
         else:
             self._type(text)
-
-        # 4. Feed to progressive transcriber (audio always; draft text only for non-commands)
-        if self.progressive is not None:
-            draft = text if not tool else ""
-            self.progressive.add_segment(segment, draft)
 
     # ------------------------------------------------------------------
     # Command dispatch

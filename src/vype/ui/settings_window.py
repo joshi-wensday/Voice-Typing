@@ -657,20 +657,44 @@ class SettingsWindow:
         # ── Integrated output card ──────────────────────────────────────
         body3 = self._make_card(
             panel, "Integrated Output",
-            "Show a floating text window with live + progressively refined transcription. "
-            "Restart required to enable/disable.",
+            "Floating window showing live transcription. "
+            "Draft text appears immediately after each spoken segment. "
+            "Refinement layers are optional — enable them to improve accuracy "
+            "at the cost of slight delays. Restart required.",
         )
         self.var_integrated_output = tk.BooleanVar(
             master=self.win,
             value=self.cfgm.config.ui.integrated_output_enabled,
         )
         self._make_checkbutton(
-            body3, "Enable integrated output window", self.var_integrated_output,
+            body3, "Show integrated output window (recommended)", self.var_integrated_output,
+        ).pack(anchor="w", pady=(0, 10))
+
+        # ── Pause refinement ────────────────────────────────────────────
+        tk.Frame(body3, bg=ColorTheme.BORDER, height=1).pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            body3, text="Refinement Layers",
+            bg=ColorTheme.BG_CARD, fg=ColorTheme.TEXT_SECONDARY,
+            font=("Segoe UI", 9, "bold"),
         ).pack(anchor="w", pady=(0, 6))
 
+        self.var_io_pause_refine = tk.BooleanVar(
+            master=self.win,
+            value=getattr(self.cfgm.config.ui, "integrated_output_pause_refine", False),
+        )
+        self._make_checkbutton(
+            body3, "Pause refinement — re-transcribe full session after silence",
+            self.var_io_pause_refine,
+        ).pack(anchor="w", pady=(0, 2))
+        tk.Label(
+            body3, text="Re-transcribes the whole session for higher accuracy. ~0.5–2 s per pass.",
+            bg=ColorTheme.BG_CARD, fg=ColorTheme.TEXT_SECONDARY,
+            font=("Segoe UI", 8), wraplength=400,
+        ).pack(anchor="w", padx=(20, 0), pady=(0, 6))
+
         wc_io1 = self._card_row(
-            body3, "Refine after silence",
-            "Seconds of silence before a refinement pass runs (1–15 s)",
+            body3, "Silence before refine",
+            "Seconds of silence that trigger a pause refinement pass (1–15 s)",
         )
         self.var_io_pause = tk.DoubleVar(
             master=self.win,
@@ -684,8 +708,14 @@ class SettingsWindow:
             value=self.cfgm.config.ui.integrated_output_final_refine,
         )
         self._make_checkbutton(
-            body3, "Run full-session refinement when dictation stops", self.var_io_final,
-        ).pack(anchor="w", pady=(6, 0))
+            body3, "Final refinement — full-session pass when dictation stops",
+            self.var_io_final,
+        ).pack(anchor="w", pady=(6, 2))
+        tk.Label(
+            body3, text="One clean polished transcript after pressing the hotkey to stop.",
+            bg=ColorTheme.BG_CARD, fg=ColorTheme.TEXT_SECONDARY,
+            font=("Segoe UI", 8), wraplength=400,
+        ).pack(anchor="w", padx=(20, 0), pady=(0, 0))
 
     def _build_speech_panel(self, panel: tk.Frame) -> None:
         self._panel_header(panel, "Speech", "Canary STT model and inference settings")
@@ -1277,6 +1307,7 @@ class SettingsWindow:
                 # General — integrated output
                 ui__integrated_output_enabled=self.var_integrated_output.get(),
                 ui__integrated_output_pause_sec=float(self.var_io_pause.get()),
+                ui__integrated_output_pause_refine=self.var_io_pause_refine.get(),
                 ui__integrated_output_final_refine=self.var_io_final.get(),
             )
 

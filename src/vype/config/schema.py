@@ -13,7 +13,7 @@ class STTConfig(BaseModel):
     model: str = "nvidia/canary-qwen-2.5b"  # any HuggingFace model ID
     device: str = "cuda"
     language: str = "en"
-    max_new_tokens: int = 256           # ceiling for generation; auto-scaled per segment
+    max_new_tokens: int = 128           # ceiling for generation; auto-scaled per segment
     enable_pnc: bool = True             # Punctuation and Capitalization via SALM prompt
     context_tail_chars: int = 400       # characters of prior typed text passed as context
 
@@ -59,9 +59,15 @@ class UIConfig(BaseModel):
     overlay_opacity: float = Field(0.9, ge=0.5, le=1.0)
 
     # Integrated output window
-    integrated_output_enabled: bool = False
+    # integrated_output_enabled: show the floating transcript window (default on).
+    # Refinement layers are opt-in — each can be enabled independently.
+    #   pause_refine  — re-transcribe full session after N seconds of silence
+    #   final_refine  — one last full-session pass when dictation stops
+    # Both are off by default: the fast per-segment draft is already very accurate.
+    integrated_output_enabled: bool = True
     integrated_output_pause_sec: float = Field(3.0, ge=1.0, le=15.0)
-    integrated_output_final_refine: bool = True
+    integrated_output_pause_refine: bool = False
+    integrated_output_final_refine: bool = False
 
 
 class OutputConfig(BaseModel):

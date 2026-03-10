@@ -9,9 +9,20 @@ Refinement tiers
 ----------------
 1. Draft   — immediately after each VAD segment (called from controller thread).
 2. Pause   — fires N seconds after the last segment (user paused speaking);
-             re-transcribes the whole session buffer.
+             re-transcribes the whole session buffer.  Only active when
+             ``pause_refine=True`` is passed to the constructor.
 3. Final   — triggered on stop_dictation(); one last whole-session pass to
-             produce the definitive transcript.
+             produce the definitive transcript.  Only runs when the controller
+             calls ``finalize()``.
+
+Design goals
+------------
+* Draft transcription is NEVER blocked by a background refinement pass.
+  Non-final refinement uses a non-blocking engine lock acquire; if the engine
+  is busy processing a new VAD segment, the refinement is deferred until the
+  next natural pause rather than stalling the real-time stream.
+* Every VAD segment's audio is buffered even when its transcription returned
+  empty text, so final refinement sees the complete session audio.
 """
 
 from __future__ import annotations
@@ -50,10 +61,12 @@ class ProgressiveTranscriber:
         engine,  # CanaryQwenEngine — imported lazily to avoid circular deps
         sample_rate: int = 16000,
         pause_sec: float = 3.0,
+        pause_refine: bool = False,
     ) -> None:
         self._engine = engine
         self._sample_rate = sample_rate
         self._pause_sec = pause_sec
+        self._pause_refine = pause_refine
 
         self._lock = threading.Lock()
         self._audio_buf: list[np.ndarray] = []   # one entry per VAD segment
@@ -73,23 +86,28 @@ class ProgressiveTranscriber:
     def add_segment(self, audio: np.ndarray, draft_text: str) -> None:
         """Record a new VAD segment and emit its draft text.
 
-        Called from the controller's stream thread for every successfully
-        transcribed segment.  The audio is stored for later refinement.
+        Called from the controller's stream thread for every VAD segment
+        (successfully transcribed OR empty — we always buffer the audio so
+        that final/pause refinement sees the complete session audio even when
+        individual segment transcription failed).
         """
         with self._lock:
             self._audio_buf.append(audio.copy())
 
-        # Emit draft text immediately
+        # Emit draft text immediately (may be "" when transcription failed)
         if self.on_draft_text and draft_text:
             self.on_draft_text(draft_text)
 
-        # Reset the pause timer — refinement fires N seconds after last speech
-        self._reset_pause_timer()
+        # Reset the pause timer only when pause refinement is enabled
+        if self._pause_refine:
+            self._reset_pause_timer()
 
     def finalize(self) -> None:
         """Trigger the final whole-session refinement (call on stop_dictation).
 
-        Cancels any pending pause timer and runs a final pass in a thread.
+        Cancels any pending pause timer and runs a final blocking pass in a
+        thread.  This is the only refinement mode that waits for the engine
+        lock rather than deferring.
         """
         self._cancel_pause_timer()
         threading.Thread(
@@ -142,6 +160,13 @@ class ProgressiveTranscriber:
         """Re-transcribe the entire audio buffer and emit refined text.
 
         ``final`` is True only for the stop-dictation pass.
+
+        Non-final pass:  uses ``engine.transcribe_nowait()`` — if the engine
+        is busy processing a live VAD segment, the refinement is silently
+        deferred (the pause timer will fire again after the next silence).
+
+        Final pass:  uses the blocking ``engine.transcribe()`` since we are
+        stopping anyway and the user expects one clean polished result.
         """
         # Don't stack concurrent refinements
         if self._running_refinement:
@@ -152,8 +177,13 @@ class ProgressiveTranscriber:
         audio = self._get_full_audio()
         audio_sec = len(audio) / self._sample_rate
 
-        if audio_sec < _MIN_AUDIO_SEC:
+        if audio_sec < _MIN_AUDIO_SEC and not final:
             logger.debug("Skipping refinement — only %.1f s of audio", audio_sec)
+            self._running_refinement = False
+            return
+
+        if audio_sec == 0:
+            logger.debug("Skipping refinement — audio buffer is empty")
             self._running_refinement = False
             return
 
@@ -164,7 +194,25 @@ class ProgressiveTranscriber:
         )
 
         try:
-            result = self._engine.transcribe(audio, sample_rate=self._sample_rate)
+            if final:
+                # Blocking: wait for the engine, we're shutting down anyway
+                result = self._engine.transcribe(audio, sample_rate=self._sample_rate)
+            else:
+                # Non-blocking: if the engine is busy with live draft transcription,
+                # defer this refinement pass rather than stalling the stream thread.
+                result = self._engine.transcribe_nowait(audio, sample_rate=self._sample_rate)
+                if result is None:
+                    logger.debug(
+                        "Pause refinement deferred — engine busy with live transcription; "
+                        "will retry after next silence"
+                    )
+                    self._running_refinement = False
+                    self._emit_status("idle")
+                    # Re-arm the pause timer so refinement retries automatically
+                    if self._pause_refine:
+                        self._reset_pause_timer()
+                    return
+
             text = result.text
             logger.info("Refinement complete — %d chars", len(text))
             if self.on_refined_text:

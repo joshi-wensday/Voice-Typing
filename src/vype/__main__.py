@@ -122,7 +122,10 @@ def _run_app() -> None:
     # Settings window
     settings = SettingsWindow(cfgm, root=root)
 
-    # ── Integrated output window (opt-in via config) ──────────────────────
+    # ── Integrated output window ───────────────────────────────────────────
+    # Shown by default (integrated_output_enabled=True in schema.py).
+    # Refinement layers (pause / final) are off by default — the per-segment
+    # draft is already very accurate and refinement can be enabled in Settings.
     _output_win = None
     if cfgm.config.ui.integrated_output_enabled:
         from vype.stt.progressive_transcriber import ProgressiveTranscriber
@@ -133,6 +136,7 @@ def _run_app() -> None:
             engine=controller.stt,
             sample_rate=cfgm.config.audio.sample_rate,
             pause_sec=cfgm.config.ui.integrated_output_pause_sec,
+            pause_refine=cfgm.config.ui.integrated_output_pause_refine,
         )
         # All callbacks must be dispatched via root.after — Tk is not thread-safe
         _prog.on_draft_text   = lambda t: root.after(0, _output_win.append_draft, t)
@@ -142,7 +146,12 @@ def _run_app() -> None:
 
         controller.progressive = _prog
         _output_win.show()
-        logger.info("Integrated output window enabled")
+        logger.info(
+            "Integrated output window enabled "
+            "(pause_refine=%s, final_refine=%s)",
+            cfgm.config.ui.integrated_output_pause_refine,
+            cfgm.config.ui.integrated_output_final_refine,
+        )
 
     # Overlay
     overlay = Overlay(

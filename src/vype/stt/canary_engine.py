@@ -243,8 +243,20 @@ class CanaryQwenEngine:
         assert self._model is not None
         import torch
 
-        # Scale max_new_tokens to audio length: ~25 tokens/sec, min 128
-        tokens = max(128, min(self.max_new_tokens, int(audio_sec * 25) + 32))
+        # Scale max_new_tokens to audio length.
+        #
+        # English speech ≈ 3 words/s ≈ 4-5 tokens/s (Qwen subword tokeniser).
+        # We add a small headroom constant (16) and cap at the user's config limit.
+        # The tight cap is intentional: the LLM decoder is the main latency driver
+        # (each token adds ~6-7 ms on an RTX 3080 due to memory bandwidth).
+        # Keeping this low means short segments return in ~150-400 ms instead of
+        # the 1-2 s you'd get with the old 128-token floor.
+        #
+        #   1s → max(48, 23)  = 48 tokens  ≈ 310 ms decoder
+        #   5s → max(48, 51)  = 51 tokens  ≈ 330 ms decoder
+        #  10s → max(48, 86)  = 86 tokens  ≈ 560 ms decoder
+        #  30s → max(48, 226) = min(config, 226) tokens
+        tokens = max(48, min(self.max_new_tokens, int(audio_sec * 7) + 16))
 
         prompt = self._build_prompt()
 
@@ -267,21 +279,23 @@ class CanaryQwenEngine:
         ).strip()
         return text
 
-    def _transcribe_wav(self, wav_path: str, audio_sec: float) -> str:
-        """Transcribe a WAV file and apply ITN.  Acquires inference_lock."""
-        with self.inference_lock:
+    def _transcribe_wav_body(self, wav_path: str, audio_sec: float) -> str:
+        """Run transcription + cleanup.  Caller MUST already hold ``inference_lock``."""
+        try:
+            raw = self._run_transcribe(wav_path, audio_sec)
+        finally:
             try:
-                raw = self._run_transcribe(wav_path, audio_sec)
-            finally:
-                try:
-                    os.unlink(wav_path)
-                except OSError:
-                    pass
-
+                os.unlink(wav_path)
+            except OSError:
+                pass
         if not raw:
             return ""
-
         return _apply_itn(raw)
+
+    def _transcribe_wav(self, wav_path: str, audio_sec: float) -> str:
+        """Transcribe a WAV file and apply ITN.  Acquires inference_lock (blocking)."""
+        with self.inference_lock:
+            return self._transcribe_wav_body(wav_path, audio_sec)
 
     # ------------------------------------------------------------------
     # Public transcription API
@@ -302,6 +316,40 @@ class CanaryQwenEngine:
         audio_sec = len(audio_data) / sample_rate
         wav_path = _write_temp_wav(audio_data, sample_rate)
         text = self._transcribe_wav(wav_path, audio_sec)
+        return TranscriptionResult(text=text, language=self.language)
+
+    def transcribe_nowait(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int = 16000,
+    ) -> Optional[TranscriptionResult]:
+        """Non-blocking transcription: returns ``None`` if the engine is busy.
+
+        Used by background refinement passes so they never stall the foreground
+        stream-processing thread.  If the inference lock cannot be acquired
+        immediately (draft transcription is in progress) the caller should
+        defer and retry after the next natural speech pause.
+        """
+        if audio_data.size == 0:
+            return TranscriptionResult(text="", language=self.language)
+        if self._model is None:
+            self.preload()
+
+        audio_sec = len(audio_data) / sample_rate
+        wav_path = _write_temp_wav(audio_data, sample_rate)
+        acquired = self.inference_lock.acquire(blocking=False)
+        if not acquired:
+            try:
+                os.unlink(wav_path)
+            except OSError:
+                pass
+            return None  # engine busy — caller should defer
+
+        try:
+            text = self._transcribe_wav_body(wav_path, audio_sec)
+        finally:
+            self.inference_lock.release()
+
         return TranscriptionResult(text=text, language=self.language)
 
     def transcribe_incremental(
