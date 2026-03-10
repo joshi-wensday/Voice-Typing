@@ -137,6 +137,7 @@ def _run_app() -> None:
             sample_rate=cfgm.config.audio.sample_rate,
             pause_sec=cfgm.config.ui.integrated_output_pause_sec,
             pause_refine=cfgm.config.ui.integrated_output_pause_refine,
+            final_refine=cfgm.config.ui.integrated_output_final_refine,
         )
         # All callbacks must be dispatched via root.after — Tk is not thread-safe
         _prog.on_draft_text   = lambda t: root.after(0, _output_win.append_draft, t)

@@ -13,19 +13,27 @@ The session transcript is divided into two zones:
 Each time a pause-refinement pass fires it:
   1. Transcribes ONLY the ``unrefined_segs`` audio.
   2. Appends the result to ``locked_text``.
-  3. Clears ``unrefined_segs``.
-  4. Emits the full ``locked_text`` so the UI can replace the display.
+  3. Moves those segments to ``locked_segs`` (audio retained for final pass).
+  4. Clears ``unrefined_segs``.
+  5. Emits the full ``locked_text`` so the UI can replace the display.
 
 Previously refined text is therefore locked in permanently — it is never
-re-processed, never replaced, and never lost.
+re-processed or changed during normal operation.
+
+Final refinement (``final_refine=True``)
+-----------------------------------------
+When dictation stops and the user has opted in, ``_do_final`` re-transcribes
+the *entire* session (``locked_segs`` + remaining ``unrefined_segs``) in
+window-sized chunks.  The ``locked_text`` is reset and rebuilt from scratch,
+producing a single high-quality whole-session transcript.
+
+Without ``final_refine``, only the remaining ``unrefined_segs`` are processed
+(incremental behaviour — locked text is left unchanged).
 
 If ``unrefined_segs`` has accumulated more than ``window_sec`` (35 s) of audio
 (e.g. because several refinements were deferred), the oldest segments are
 committed with their original draft text rather than re-transcribed.  This
 keeps every transcription call within the model's optimal 30–40 s range.
-
-Final refinement works the same way but processes ``unrefined_segs`` in
-``window_sec`` chunks so long sessions never exceed the optimal range.
 """
 
 from __future__ import annotations
@@ -64,18 +72,24 @@ class ProgressiveTranscriber:
         sample_rate: int = 16000,
         pause_sec: float = 3.0,
         pause_refine: bool = False,
+        final_refine: bool = False,
         window_sec: float = _OPTIMAL_WINDOW_SEC,
     ) -> None:
         self._engine = engine
         self._sample_rate = sample_rate
         self._pause_sec = pause_sec
         self._pause_refine = pause_refine
+        self._final_refine = final_refine
         self._window_sec = window_sec
 
         self._lock = threading.Lock()
 
-        # Immutable zone: grows only via append, never modified in place.
+        # Immutable zone: grows only via _append_locked, never modified in place.
         self._locked_text: str = ""
+
+        # Audio archive for already-locked segments.
+        # Kept so _do_final can re-transcribe the whole session when final_refine=True.
+        self._locked_segs: list[tuple[np.ndarray, str]] = []
 
         # Pending zone: segments accumulated since the last successful refinement.
         # Each entry: (audio_array, draft_text)
@@ -110,9 +124,10 @@ class ProgressiveTranscriber:
     def finalize(self) -> None:
         """Trigger final refinement (called on stop_dictation).
 
-        Processes remaining unrefined segments in window-sized chunks so that
-        even a long session always stays within the model's optimal range.
-        Blocking — waits for the engine lock since dictation is stopping.
+        If final_refine=True: re-transcribes the whole session for maximum
+        accuracy (locked_segs + unrefined_segs in window-sized chunks).
+        If final_refine=False: processes only remaining unrefined_segs.
+        Always blocking — dictation is stopping so we wait for completion.
         """
         self._cancel_pause_timer()
         threading.Thread(
@@ -125,6 +140,7 @@ class ProgressiveTranscriber:
         self._cancel_pause_timer()
         with self._lock:
             self._locked_text = ""
+            self._locked_segs.clear()
             self._unrefined_segs.clear()
         self._emit_status("idle")
 
@@ -181,12 +197,26 @@ class ProgressiveTranscriber:
         return segs[:cut], segs[cut:]
 
     def _append_locked(self, new_text: str) -> None:
-        """Thread-safe append to locked_text."""
+        """Thread-safe append to locked_text with smart sentence joining.
+
+        If the existing locked text ends without sentence-ending punctuation
+        and the new text begins with a capital letter (suggesting a new
+        sentence), inserts '. ' as the separator instead of just ' '.
+        This corrects the common case where the STT model omits a terminal
+        full stop between consecutive utterances.
+        """
         if not new_text:
             return
         with self._lock:
             if self._locked_text:
-                self._locked_text = self._locked_text + " " + new_text
+                last_char = self._locked_text[-1]
+                first_char = new_text[0]
+                # Missing terminal punctuation + new sentence (capital start) → add period
+                if last_char.isalpha() and first_char.isupper():
+                    sep = ". "
+                else:
+                    sep = " " if last_char not in (" ", "\n") else ""
+                self._locked_text = self._locked_text + sep + new_text
             else:
                 self._locked_text = new_text
 
@@ -268,6 +298,8 @@ class ProgressiveTranscriber:
         new_locked = self._get_locked()
 
         with self._lock:
+            # Archive the processed segments so _do_final can re-use their audio.
+            self._locked_segs.extend(segs)  # segs == snapshot of first n unrefined_segs
             # Remove the segments we just processed; keep any that arrived
             # in the background while we were transcribing.
             self._unrefined_segs = self._unrefined_segs[n:]
@@ -288,27 +320,46 @@ class ProgressiveTranscriber:
     # ── Final pass ────────────────────────────────────────────────────────
 
     def _do_final(self) -> None:
-        """Blocking chunked refinement of all remaining unrefined segments."""
-        with self._lock:
-            segs = list(self._unrefined_segs)
-            n = len(segs)
+        """Blocking chunked refinement on stop_dictation.
 
-        if not segs:
-            # Nothing pending — just emit whatever is locked
+        final_refine=True  → whole-session re-transcription: combines locked_segs
+                             + unrefined_segs, resets locked_text, rebuilds from
+                             scratch in window-sized chunks for maximum accuracy.
+        final_refine=False → incremental: processes only the remaining
+                             unrefined_segs and appends to locked_text (default).
+        """
+        with self._lock:
+            unrefined = list(self._unrefined_segs)
+            n = len(unrefined)
+            if self._final_refine:
+                all_segs = list(self._locked_segs) + unrefined
+            else:
+                all_segs = unrefined
+
+        if not all_segs:
+            # Nothing to process — emit whatever is locked as final
             locked = self._get_locked()
             if locked and self.on_refined_text:
                 self.on_refined_text(locked, True)
             return
 
-        total_sec = sum(s[0].size for s in segs) / self._sample_rate
+        total_sec = sum(s[0].size for s in all_segs) / self._sample_rate
         self._emit_status("finalizing")
-        logger.info("Final refinement — %.1f s in %d pending segments", total_sec, len(segs))
+        mode = "whole-session" if self._final_refine else "incremental"
+        logger.info("Final %s refinement — %.1f s in %d segments",
+                    mode, total_sec, len(all_segs))
+
+        if self._final_refine:
+            # Reset locked text — we rebuild it entirely from the whole session
+            with self._lock:
+                self._locked_text = ""
+                self._locked_segs = []
 
         chunk_samples = int(self._window_sec * self._sample_rate)
         chunk_segs: list = []
         chunk_size = 0
 
-        for seg in segs:
+        for seg in all_segs:
             chunk_segs.append(seg)
             chunk_size += seg[0].size
             if chunk_size >= chunk_samples:

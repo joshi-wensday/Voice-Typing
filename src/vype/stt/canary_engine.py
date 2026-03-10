@@ -226,7 +226,8 @@ class CanaryQwenEngine:
         """
         tag = getattr(self._model, "audio_locator_tag", "<|audioplaceholder|>")
         pnc = (
-            "Use correct punctuation and capitalisation. "
+            "Use correct punctuation and capitalisation, "
+            "including a full stop at the end of each complete sentence. "
             if self.enable_pnc else ""
         )
         return (
