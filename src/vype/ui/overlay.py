@@ -68,6 +68,7 @@ class Overlay:
         # Callbacks
         self.on_toggle: Optional[Callable[[], None]] = None
         self.on_settings: Optional[Callable[[], None]] = None
+        self.on_output_toggle: Optional[Callable[[], None]] = None
 
         # Animation state
         self._state = "idle"  # idle, recording, processing
@@ -742,10 +743,21 @@ class Overlay:
         """Handle mouse leave (hover end)."""
         self._is_hovering = False
 
-    def _on_right_click(self, _e: tk.Event) -> None:
-        """Handle right-click to open settings."""
+    def _on_right_click(self, e: tk.Event) -> None:
+        """Handle right-click — show a small context menu."""
+        menu = tk.Menu(
+            self.win, tearoff=0,
+            bg="#1e2a3a", fg="#f1f5f9",
+            activebackground="#334155", activeforeground="#f1f5f9",
+            bd=0, relief=tk.FLAT,
+            font=("Segoe UI", 10),
+        )
         if self.on_settings:
-            self.on_settings()
+            menu.add_command(label="  Settings", command=self.on_settings)
+        if self.on_output_toggle:
+            menu.add_command(label="  Toggle Output Window", command=self.on_output_toggle)
+        if menu.index("end") is not None:
+            menu.post(e.x_root, e.y_root)
 
     def _on_left_press(self, e: tk.Event) -> None:
         """Handle left button press (start of drag or click)."""

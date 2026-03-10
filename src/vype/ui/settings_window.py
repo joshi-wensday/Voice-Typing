@@ -579,26 +579,32 @@ class SettingsWindow:
     def _card_row(
         self, parent: tk.Frame, label: str, help_text: str = "",
     ) -> tk.Frame:
-        """Create a two-column label + widget row.  Returns the right-side frame."""
+        """Create a two-column label + widget row.  Returns the right-side frame.
+
+        Uses grid geometry so the label column has a guaranteed minimum width
+        without pack_propagate — avoids the zero-width initial render artefact
+        that causes text to appear as dots on some Windows DPI configurations.
+        """
         row = tk.Frame(parent, bg=ColorTheme.BG_CARD_RAISED)
         row.pack(fill=tk.X, pady=5)
+        # Column 0 = label (fixed minimum width); column 1 = widget (expands)
+        row.columnconfigure(0, minsize=220)
+        row.columnconfigure(1, weight=1)
 
-        lbl_col = tk.Frame(row, bg=ColorTheme.BG_CARD_RAISED, width=230)
-        lbl_col.pack(side=tk.LEFT)
-        lbl_col.pack_propagate(False)
         tk.Label(
-            lbl_col, text=label, bg=ColorTheme.BG_CARD_RAISED,
+            row, text=label, bg=ColorTheme.BG_CARD_RAISED,
             fg=ColorTheme.TEXT_PRIMARY, font=("Segoe UI", 10), anchor="w",
-        ).pack(anchor="w")
+        ).grid(row=0, column=0, sticky="nw", padx=(0, 12))
+
         if help_text:
             tk.Label(
-                lbl_col, text=help_text, bg=ColorTheme.BG_CARD_RAISED,
+                row, text=help_text, bg=ColorTheme.BG_CARD_RAISED,
                 fg=ColorTheme.TEXT_SECONDARY, font=("Segoe UI", 8),
-                wraplength=205, anchor="w", justify="left",
-            ).pack(anchor="w")
+                wraplength=210, anchor="w", justify="left",
+            ).grid(row=1, column=0, sticky="nw", padx=(0, 12), pady=(0, 2))
 
         widget_col = tk.Frame(row, bg=ColorTheme.BG_CARD_RAISED)
-        widget_col.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        widget_col.grid(row=0, column=1, rowspan=2 if help_text else 1, sticky="w")
         return widget_col
 
     def _make_combobox(
@@ -647,6 +653,39 @@ class SettingsWindow:
         self._make_checkbutton(
             body2, "Closing window sends app to tray (don't quit)", self.var_close_to_tray,
         ).pack(anchor="w", pady=3)
+
+        # ── Integrated output card ──────────────────────────────────────
+        body3 = self._make_card(
+            panel, "Integrated Output",
+            "Show a floating text window with live + progressively refined transcription. "
+            "Restart required to enable/disable.",
+        )
+        self.var_integrated_output = tk.BooleanVar(
+            master=self.win,
+            value=self.cfgm.config.ui.integrated_output_enabled,
+        )
+        self._make_checkbutton(
+            body3, "Enable integrated output window", self.var_integrated_output,
+        ).pack(anchor="w", pady=(0, 6))
+
+        wc_io1 = self._card_row(
+            body3, "Refine after silence",
+            "Seconds of silence before a refinement pass runs (1–15 s)",
+        )
+        self.var_io_pause = tk.DoubleVar(
+            master=self.win,
+            value=self.cfgm.config.ui.integrated_output_pause_sec,
+        )
+        ModernSlider(wc_io1, variable=self.var_io_pause, from_=1.0, to=15.0,
+                     resolution=0.5, width=160).pack(anchor="w")
+
+        self.var_io_final = tk.BooleanVar(
+            master=self.win,
+            value=self.cfgm.config.ui.integrated_output_final_refine,
+        )
+        self._make_checkbutton(
+            body3, "Run full-session refinement when dictation stops", self.var_io_final,
+        ).pack(anchor="w", pady=(6, 0))
 
     def _build_speech_panel(self, panel: tk.Frame) -> None:
         self._panel_header(panel, "Speech", "Canary STT model and inference settings")
@@ -1235,6 +1274,10 @@ class SettingsWindow:
                 # Advanced — output
                 output__primary_method=self.var_output_method.get().strip(),
                 output__prefer_clipboard_over_chars=int(self.var_prefer_clipboard.get()),
+                # General — integrated output
+                ui__integrated_output_enabled=self.var_integrated_output.get(),
+                ui__integrated_output_pause_sec=float(self.var_io_pause.get()),
+                ui__integrated_output_final_refine=self.var_io_final.get(),
             )
 
             if needs_restart:

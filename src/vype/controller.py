@@ -125,6 +125,10 @@ class VoiceTypingController:
         # UI callbacks
         self.on_status_change: Optional[Callable[[str], None]] = None
 
+        # Optional integrated output (set externally before start)
+        # Type: ProgressiveTranscriber | None — imported lazily to avoid circular deps
+        self.progressive = None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -134,6 +138,8 @@ class VoiceTypingController:
             return
         self._typed_tail = ""
         self._typed_segments = []
+        if self.progressive is not None:
+            self.progressive.reset()
         self.vad.reset()
         self._stop_stream.clear()
         self.stt.preload()
@@ -155,6 +161,8 @@ class VoiceTypingController:
         if self._stream_thread and self._stream_thread.is_alive():
             self._stream_thread.join(timeout=3.0)
         self.stt.reset_context()
+        if self.progressive is not None and self.cfg.config.ui.integrated_output_final_refine:
+            self.progressive.finalize()
         self._set_status("idle")
         logger.info("Dictation stopped")
 
@@ -217,6 +225,11 @@ class VoiceTypingController:
             self._dispatch_command(tool)
         else:
             self._type(text)
+
+        # 4. Feed to progressive transcriber (audio always; draft text only for non-commands)
+        if self.progressive is not None:
+            draft = text if not tool else ""
+            self.progressive.add_segment(segment, draft)
 
     # ------------------------------------------------------------------
     # Command dispatch

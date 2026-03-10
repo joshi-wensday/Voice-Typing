@@ -58,6 +58,11 @@ class UIConfig(BaseModel):
     settings_window_opacity: float = Field(0.97, ge=0.7, le=1.0)
     overlay_opacity: float = Field(0.9, ge=0.5, le=1.0)
 
+    # Integrated output window
+    integrated_output_enabled: bool = False
+    integrated_output_pause_sec: float = Field(3.0, ge=1.0, le=15.0)
+    integrated_output_final_refine: bool = True
+
 
 class OutputConfig(BaseModel):
     """Text output configuration."""

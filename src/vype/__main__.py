@@ -101,12 +101,48 @@ def _run_app() -> None:
         print(f"Error: Failed to initialize application: {e}")
         return
 
+    # ── Preload STT model in background ──────────────────────────────────
+    # Starts loading while the UI is being built so the first hotkey press
+    # is instant rather than waiting 30–60 s for the model to load.
+    # The LoRA adapter message ("LoRA adapter installed") is normal — NeMo
+    # reconstructs the model architecture in memory on every Python process
+    # start.  It is NOT a re-download; weights are already cached locally.
+    import threading as _threading
+    _threading.Thread(
+        target=controller.stt.preload,
+        daemon=True,
+        name="vype-model-preload",
+    ).start()
+    logger.info("STT model preload started in background (first hotkey will not block)")
+
     # Tk root for settings/overlay on main thread
     root = tk.Tk()
     root.withdraw()
 
     # Settings window
     settings = SettingsWindow(cfgm, root=root)
+
+    # ── Integrated output window (opt-in via config) ──────────────────────
+    _output_win = None
+    if cfgm.config.ui.integrated_output_enabled:
+        from vype.stt.progressive_transcriber import ProgressiveTranscriber
+        from vype.ui.integrated_output import IntegratedOutputWindow
+
+        _output_win = IntegratedOutputWindow(root)
+        _prog = ProgressiveTranscriber(
+            engine=controller.stt,
+            sample_rate=cfgm.config.audio.sample_rate,
+            pause_sec=cfgm.config.ui.integrated_output_pause_sec,
+        )
+        # All callbacks must be dispatched via root.after — Tk is not thread-safe
+        _prog.on_draft_text   = lambda t: root.after(0, _output_win.append_draft, t)
+        _prog.on_refined_text = lambda t, f: root.after(0, _output_win.replace_refined, t, f)
+        _prog.on_status       = lambda s: root.after(0, _output_win.set_status, s)
+        _output_win.on_clear  = _prog.reset
+
+        controller.progressive = _prog
+        _output_win.show()
+        logger.info("Integrated output window enabled")
 
     # Overlay
     overlay = Overlay(
@@ -119,6 +155,8 @@ def _run_app() -> None:
     )
     overlay.on_toggle = controller.toggle
     overlay.on_settings = settings.show
+    if _output_win is not None:
+        overlay.on_output_toggle = _output_win.toggle
     overlay.set_audio_capture(controller.audio)
     if cfgm.config.ui.show_visualizer:
         overlay.show()

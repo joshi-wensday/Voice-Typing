@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 import wave
 from dataclasses import dataclass
 from typing import Optional
@@ -152,7 +153,9 @@ class CanaryQwenEngine:
         self.context_tail_chars = context_tail_chars
 
         self._model = None
-        self._context_tail: str = ""    # rolling transcript context passed in prompt
+        # Shared lock so ProgressiveTranscriber's background refinement thread
+        # never runs concurrently with a foreground segment transcription.
+        self.inference_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -197,8 +200,7 @@ class CanaryQwenEngine:
         self.preload()
 
     def reset_context(self) -> None:
-        """Clear the rolling text context tail. Call on stop_dictation()."""
-        self._context_tail = ""
+        """No-op: kept for API compatibility (context tail removed)."""
 
     def get_supported_models(self) -> list[str]:
         return [
@@ -212,37 +214,39 @@ class CanaryQwenEngine:
     # Prompt engineering
     # ------------------------------------------------------------------
 
-    def _build_prompt(self, context_tail: str) -> str:
-        """Build the SALM chat prompt with PnC instruction and rolling context."""
-        tag = getattr(self._model, "audio_locator_tag", "<|audioplaceholder|>")
+    def _build_prompt(self, context_tail: str = "") -> str:
+        """Build the SALM chat prompt for clean speech transcription.
 
+        Context is intentionally NOT included in the prompt.  Injecting prior
+        transcript text caused the model to reproduce old text verbatim before
+        generating the new transcription, producing duplication artefacts and
+        occasionally echoing the instruction text itself.  Canary transcribes
+        accurately from audio alone without needing rolling context in the
+        prompt.
+        """
+        tag = getattr(self._model, "audio_locator_tag", "<|audioplaceholder|>")
         pnc = (
-            "Use correct punctuation and capitalization. "
+            "Use correct punctuation and capitalisation. "
             if self.enable_pnc else ""
         )
-        instruction = (
-            f"{pnc}Output ONLY the transcript text with no commentary, "
-            "labels, or meta-text."
+        return (
+            f"{pnc}Transcribe the speech in the audio exactly as spoken. "
+            f"Output only the transcript with no labels or commentary.\n{tag}"
         )
-
-        ctx = context_tail.strip()[-self.context_tail_chars:] if context_tail else ""
-        if ctx:
-            return f"Prior context (continue naturally): {ctx}\n{instruction}\n{tag}"
-        return f"{instruction}\n{tag}"
 
     # ------------------------------------------------------------------
     # Inference
     # ------------------------------------------------------------------
 
     def _run_transcribe(self, wav_path: str, audio_sec: float) -> str:
-        """Run SALM generation on a single WAV file."""
+        """Run SALM generation on a single WAV file (caller must hold inference_lock)."""
         assert self._model is not None
         import torch
 
         # Scale max_new_tokens to audio length: ~25 tokens/sec, min 128
         tokens = max(128, min(self.max_new_tokens, int(audio_sec * 25) + 32))
 
-        prompt = self._build_prompt(self._context_tail)
+        prompt = self._build_prompt()
 
         with torch.inference_mode():
             answer_ids = self._model.generate(
@@ -264,26 +268,20 @@ class CanaryQwenEngine:
         return text
 
     def _transcribe_wav(self, wav_path: str, audio_sec: float) -> str:
-        """Transcribe a WAV file, apply ITN, update context tail."""
-        try:
-            raw = self._run_transcribe(wav_path, audio_sec)
-        finally:
+        """Transcribe a WAV file and apply ITN.  Acquires inference_lock."""
+        with self.inference_lock:
             try:
-                os.unlink(wav_path)
-            except OSError:
-                pass
+                raw = self._run_transcribe(wav_path, audio_sec)
+            finally:
+                try:
+                    os.unlink(wav_path)
+                except OSError:
+                    pass
 
         if not raw:
             return ""
 
-        text = _apply_itn(raw)
-
-        # Update rolling context tail
-        self._context_tail += " " + text
-        if len(self._context_tail) > self.context_tail_chars * 3:
-            self._context_tail = self._context_tail[-self.context_tail_chars:]
-
-        return text
+        return _apply_itn(raw)
 
     # ------------------------------------------------------------------
     # Public transcription API
@@ -310,12 +308,13 @@ class CanaryQwenEngine:
         self,
         audio_data: np.ndarray,
         sample_rate: int = 16000,
-        initial_prompt: str | None = None,
+        initial_prompt: str | None = None,  # kept for API compatibility, unused
     ) -> str:
         """Transcribe a streaming audio segment. Returns plain text.
 
-        ``initial_prompt`` is accepted for API compatibility; if provided it
-        overrides the engine's internal rolling context tail for this call.
+        ``initial_prompt`` is accepted for API compatibility but is no longer
+        injected into the prompt (context injection caused the model to
+        reproduce prior text verbatim).
         """
         if audio_data.size == 0:
             return ""
@@ -327,20 +326,6 @@ class CanaryQwenEngine:
         if self._model is None:
             self.preload()
 
-        # Allow caller to inject context (e.g. controller's _typed_tail)
-        if initial_prompt is not None:
-            saved_tail = self._context_tail
-            self._context_tail = initial_prompt
-        else:
-            saved_tail = None
-
         audio_sec = len(audio_data) / sample_rate
         wav_path = _write_temp_wav(audio_data, sample_rate)
-        text = self._transcribe_wav(wav_path, audio_sec)
-
-        # Restore tail only if we temporarily overrode it
-        if saved_tail is not None:
-            # Merge: keep the caller-provided tail + the new transcript
-            self._context_tail = initial_prompt + " " + text if text else initial_prompt  # type: ignore[operator]
-
-        return text
+        return self._transcribe_wav(wav_path, audio_sec)
