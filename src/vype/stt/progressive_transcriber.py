@@ -1,37 +1,31 @@
-"""Progressive multi-pass transcription manager — sliding window edition.
+"""Progressive multi-pass transcription manager — incremental edition.
 
-Architecture overview
----------------------
-The model (Canary-Qwen-2.5B) has an optimal transcription window of 30–40
-seconds.  Feeding the full session (which can be minutes long) hurts accuracy
-and causes token-limit truncation that silently drops text.
+Architecture
+------------
+The session transcript is divided into two zones:
 
-Instead we use a **sliding window** approach inspired by convolutional networks:
+    ┌─────────────────────────────┬────────────────────────────────┐
+    │  locked_text  (immutable)   │  unrefined_segs  (pending)     │
+    │  already refined — NEVER    │  segments since last successful │
+    │  re-processed or changed    │  refinement pass               │
+    └─────────────────────────────┴────────────────────────────────┘
 
-    ┌────────────────────────────┬──────────────────────────────────┐
-    │  committed  (older segs)   │  active window  (last ~35 s)     │
-    │  draft quality — locked in │  re-transcribed on each refine   │
-    └────────────────────────────┴──────────────────────────────────┘
+Each time a pause-refinement pass fires it:
+  1. Transcribes ONLY the ``unrefined_segs`` audio.
+  2. Appends the result to ``locked_text``.
+  3. Clears ``unrefined_segs``.
+  4. Emits the full ``locked_text`` so the UI can replace the display.
 
-When a refinement pass runs it:
-  1. Takes only the last ``window_sec`` (default 35 s) of audio.
-  2. Re-transcribes that window with Canary → more accurate for that slice.
-  3. Emits: committed_text + refined_window_text.
+Previously refined text is therefore locked in permanently — it is never
+re-processed, never replaced, and never lost.
 
-The committed portion uses the original per-segment draft text (already very
-accurate for Canary) — it never gets re-transcribed and never gets lost.
-As the session grows, segments older than the window graduate to committed.
+If ``unrefined_segs`` has accumulated more than ``window_sec`` (35 s) of audio
+(e.g. because several refinements were deferred), the oldest segments are
+committed with their original draft text rather than re-transcribed.  This
+keeps every transcription call within the model's optimal 30–40 s range.
 
-Refinement tiers
-----------------
-1. Draft  — immediate, per VAD-segment.  Typed live, shown dimmed.
-2. Pause  — fires ``pause_sec`` after last segment; re-transcribes window.
-             Only active when ``pause_refine=True``.  Non-blocking (defers
-             if engine is busy with a live segment).
-3. Final  — triggered on stop_dictation().  Processes in 35-second chunks,
-             concatenates results.  Only runs when the controller calls
-             ``finalize()`` (controlled by ``integrated_output_final_refine``
-             config flag, default False).
+Final refinement works the same way but processes ``unrefined_segs`` in
+``window_sec`` chunks so long sessions never exceed the optimal range.
 """
 
 from __future__ import annotations
@@ -44,29 +38,24 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Minimum accumulated audio before we bother running a refinement pass.
-_MIN_AUDIO_SEC = 4.0
-
-# Canary-Qwen-2.5B optimal transcription window (seconds).
-# Accuracy peaks at 30–40 s; beyond that the model was not trained on and
-# tends to degrade, potentially truncating or dropping words.
-_OPTIMAL_WINDOW_SEC = 35.0
+_MIN_AUDIO_SEC = 4.0          # skip refinement if less audio than this
+_OPTIMAL_WINDOW_SEC = 35.0    # Canary-Qwen optimal transcription window
 
 
 class ProgressiveTranscriber:
-    """Accumulates audio segments and runs background sliding-window refinement.
+    """Incremental refinement: only new, unrefined segments are ever processed.
 
     Public interface
     ----------------
-    add_segment(audio, draft_text)   – called after each VAD segment
-    finalize()                       – trigger final chunked refinement
-    reset()                          – clear everything (Clear button / new session)
+    add_segment(audio, draft_text)  – call after every VAD segment
+    finalize()                      – trigger final chunked refinement
+    reset()                         – clear all state (Clear button / new session)
 
-    Callbacks (wire before first use)
-    ----------------------------------
-    on_draft_text(text)              – append draft text to the UI
-    on_refined_text(text, final)     – replace all UI text with refined version
-    on_status(status)                – "idle" | "refining" | "finalizing"
+    Callbacks
+    ---------
+    on_draft_text(text)             – append a new draft segment to the UI
+    on_refined_text(text, final)    – replace all UI text with the locked text
+    on_status(status)               – "idle" | "refining" | "finalizing"
     """
 
     def __init__(
@@ -84,8 +73,13 @@ class ProgressiveTranscriber:
         self._window_sec = window_sec
 
         self._lock = threading.Lock()
-        # Each entry: (audio_array, draft_text).  Grows one entry per VAD segment.
-        self._segments: list[tuple[np.ndarray, str]] = []
+
+        # Immutable zone: grows only via append, never modified in place.
+        self._locked_text: str = ""
+
+        # Pending zone: segments accumulated since the last successful refinement.
+        # Each entry: (audio_array, draft_text)
+        self._unrefined_segs: list[tuple[np.ndarray, str]] = []
 
         self._pause_timer: Optional[threading.Timer] = None
         self._running_refinement = False
@@ -99,14 +93,13 @@ class ProgressiveTranscriber:
     # ------------------------------------------------------------------
 
     def add_segment(self, audio: np.ndarray, draft_text: str) -> None:
-        """Record a new VAD segment and emit its draft text.
+        """Record a new VAD segment and emit its draft text immediately.
 
-        Always stores the audio regardless of whether transcription succeeded —
-        this guarantees the full session audio is available for refinement even
-        when individual segments produce empty text.
+        Always stores the audio even when transcription returned empty text so
+        that refinement passes have access to the complete session audio.
         """
         with self._lock:
-            self._segments.append((audio.copy(), draft_text or ""))
+            self._unrefined_segs.append((audio.copy(), draft_text or ""))
 
         if self.on_draft_text and draft_text:
             self.on_draft_text(draft_text)
@@ -115,10 +108,11 @@ class ProgressiveTranscriber:
             self._reset_pause_timer()
 
     def finalize(self) -> None:
-        """Trigger final refinement in a background thread.
+        """Trigger final refinement (called on stop_dictation).
 
-        Processes the session in ``window_sec``-sized chunks and concatenates
-        the results, keeping each chunk within the model's optimal range.
+        Processes remaining unrefined segments in window-sized chunks so that
+        even a long session always stays within the model's optimal range.
+        Blocking — waits for the engine lock since dictation is stopping.
         """
         self._cancel_pause_timer()
         threading.Thread(
@@ -127,14 +121,15 @@ class ProgressiveTranscriber:
         ).start()
 
     def reset(self) -> None:
-        """Clear all state.  Called by the [Clear] button or on new session."""
+        """Clear all state.  Called by [Clear] or when a new session starts."""
         self._cancel_pause_timer()
         with self._lock:
-            self._segments.clear()
+            self._locked_text = ""
+            self._unrefined_segs.clear()
         self._emit_status("idle")
 
     # ------------------------------------------------------------------
-    # Internal — pause timer
+    # Pause timer
     # ------------------------------------------------------------------
 
     def _reset_pause_timer(self) -> None:
@@ -155,26 +150,28 @@ class ProgressiveTranscriber:
             self._pause_timer = None
 
     # ------------------------------------------------------------------
-    # Internal — segment partitioning
+    # Helpers
     # ------------------------------------------------------------------
 
-    def _partition(self, window_sec: float) -> tuple[list, list]:
-        """Split ``_segments`` into (pre_window, window) by audio duration.
-
-        ``window`` contains the most recent ``window_sec`` seconds of segments.
-        ``pre_window`` contains everything older — their draft text is used as-is.
-        """
-        with self._lock:
-            segs = list(self._segments)  # snapshot
-
+    @staticmethod
+    def _concat_audio(segs: list[tuple[np.ndarray, str]]) -> np.ndarray:
         if not segs:
-            return [], []
+            return np.empty(0, dtype=np.float32)
+        return np.concatenate([s[0] for s in segs])
 
-        window_samples = int(window_sec * self._sample_rate)
+    @staticmethod
+    def _join_drafts(segs: list[tuple[np.ndarray, str]]) -> str:
+        parts = [s[1] for s in segs if s[1]]
+        return " ".join(parts)
+
+    def _split_window(
+        self, segs: list[tuple[np.ndarray, str]]
+    ) -> tuple[list, list]:
+        """Return (older_segs, window_segs) where window_segs ≤ window_sec."""
+        window_samples = int(self._window_sec * self._sample_rate)
         accumulated = 0
-        cut = len(segs)  # default: all in window
+        cut = 0  # default: all in older (nothing in window)
 
-        # Walk backwards to find the cut point
         for i in range(len(segs) - 1, -1, -1):
             accumulated += segs[i][0].size
             if accumulated >= window_samples:
@@ -183,140 +180,172 @@ class ProgressiveTranscriber:
 
         return segs[:cut], segs[cut:]
 
-    def _segments_to_audio(self, segs: list) -> np.ndarray:
-        if not segs:
-            return np.empty(0, dtype=np.float32)
-        return np.concatenate([s[0] for s in segs])
+    def _append_locked(self, new_text: str) -> None:
+        """Thread-safe append to locked_text."""
+        if not new_text:
+            return
+        with self._lock:
+            if self._locked_text:
+                self._locked_text = self._locked_text + " " + new_text
+            else:
+                self._locked_text = new_text
 
-    def _segments_to_text(self, segs: list) -> str:
-        """Join the draft texts of a segment list with single spaces."""
-        parts = [s[1] for s in segs if s[1]]
-        return " ".join(parts)
+    def _get_locked(self) -> str:
+        with self._lock:
+            return self._locked_text
 
     # ------------------------------------------------------------------
-    # Internal — refinement
+    # Refinement
     # ------------------------------------------------------------------
 
     def _run_refinement(self, final: bool = False) -> None:
-        """Sliding-window refinement.
-
-        Pause pass (final=False):
-            Re-transcribes the last ``window_sec`` of audio; prepends committed
-            draft text (segments older than the window) unchanged.
-            Uses ``transcribe_nowait()`` — defers if engine is busy.
-
-        Final pass (final=True):
-            Processes ALL audio in ``window_sec`` chunks and concatenates the
-            results, keeping every chunk inside the model's optimal range.
-            Uses blocking ``transcribe()`` since dictation has stopped.
-        """
         if self._running_refinement:
-            logger.debug("Skipping refinement — previous pass still running")
+            logger.debug("Refinement skipped — previous pass still running")
             return
         self._running_refinement = True
-
         try:
             if final:
-                self._run_final_chunked()
+                self._do_final()
             else:
-                self._run_pause_window()
+                self._do_pause()
         except Exception as exc:
-            logger.error("Refinement failed: %s", exc, exc_info=True)
+            logger.error("Refinement error: %s", exc, exc_info=True)
         finally:
             self._running_refinement = False
             self._emit_status("idle")
 
-    def _run_pause_window(self) -> None:
-        """Non-blocking pause refinement — last window_sec of audio only."""
-        pre_segs, win_segs = self._partition(self._window_sec)
+    # ── Pause pass ────────────────────────────────────────────────────────
 
-        win_audio = self._segments_to_audio(win_segs)
-        win_sec = len(win_audio) / self._sample_rate
+    def _do_pause(self) -> None:
+        """Non-blocking incremental refinement of the pending segments."""
+        # Snapshot the pending list
+        with self._lock:
+            segs = list(self._unrefined_segs)
+        n = len(segs)
 
-        if win_sec < _MIN_AUDIO_SEC:
-            logger.debug("Pause refinement skipped — only %.1f s in window", win_sec)
+        if not segs:
+            return
+
+        # If accumulated audio exceeds the optimal window, commit the oldest
+        # segments as draft (lock them in without re-transcribing) and only
+        # transcribe the most recent window_sec of audio.
+        total_samples = sum(s[0].size for s in segs)
+        if total_samples > int(self._window_sec * self._sample_rate):
+            older, window_segs = self._split_window(segs)
+            # Commit older segments using their draft text
+            older_text = self._join_drafts(older)
+            if older_text:
+                self._append_locked(older_text)
+            segs_to_transcribe = window_segs
+        else:
+            segs_to_transcribe = segs
+
+        if not segs_to_transcribe:
+            return
+
+        audio = self._concat_audio(segs_to_transcribe)
+        audio_sec = len(audio) / self._sample_rate
+
+        if audio_sec < _MIN_AUDIO_SEC:
+            logger.debug("Pause refinement skipped — only %.1f s of new audio", audio_sec)
             return
 
         self._emit_status("refining")
-        logger.info(
-            "Pause refinement — window %.1f s  |  committed segs: %d",
-            win_sec, len(pre_segs),
-        )
+        logger.info("Pause refinement — %.1f s new audio  (locked so far: %d chars)",
+                    audio_sec, len(self._get_locked()))
 
-        result = self._engine.transcribe_nowait(win_audio, sample_rate=self._sample_rate)
+        # Non-blocking: defer rather than stall the live stream thread
+        result = self._engine.transcribe_nowait(audio, sample_rate=self._sample_rate)
         if result is None:
-            logger.debug("Pause refinement deferred — engine busy; will retry after next pause")
+            logger.debug("Pause refinement deferred — engine busy; retrying after next pause")
             self._emit_status("idle")
             if self._pause_refine:
                 self._reset_pause_timer()
             return
 
-        committed_text = self._segments_to_text(pre_segs)
-        refined_window = result.text
-        full_text = (committed_text + " " + refined_window).strip() if committed_text else refined_window
+        # ── Success: lock in the refined text ─────────────────────────────
+        self._append_locked(result.text)
+        new_locked = self._get_locked()
 
-        logger.info("Pause refinement done — %d committed chars + %d refined chars",
-                    len(committed_text), len(refined_window))
-        if self.on_refined_text:
-            self.on_refined_text(full_text, False)
-
-    def _run_final_chunked(self) -> None:
-        """Blocking final refinement — processes all segments in window-sized chunks."""
         with self._lock:
-            all_segs = list(self._segments)
+            # Remove the segments we just processed; keep any that arrived
+            # in the background while we were transcribing.
+            self._unrefined_segs = self._unrefined_segs[n:]
+            new_pending = list(self._unrefined_segs)
 
-        if not all_segs:
-            logger.debug("Final refinement skipped — no segments")
+        logger.info("Pause refinement done — locked text now %d chars", len(new_locked))
+
+        # Tell the UI: replace all displayed text with the locked text
+        if self.on_refined_text:
+            self.on_refined_text(new_locked, False)
+
+        # Re-emit any draft segments that arrived while we were transcribing
+        # so the UI shows them as pending (dimmed) after the refined portion.
+        for _, draft in new_pending:
+            if draft and self.on_draft_text:
+                self.on_draft_text(draft)
+
+    # ── Final pass ────────────────────────────────────────────────────────
+
+    def _do_final(self) -> None:
+        """Blocking chunked refinement of all remaining unrefined segments."""
+        with self._lock:
+            segs = list(self._unrefined_segs)
+            n = len(segs)
+
+        if not segs:
+            # Nothing pending — just emit whatever is locked
+            locked = self._get_locked()
+            if locked and self.on_refined_text:
+                self.on_refined_text(locked, True)
             return
 
-        total_sec = sum(s[0].size for s in all_segs) / self._sample_rate
-        if total_sec == 0:
-            return
-
+        total_sec = sum(s[0].size for s in segs) / self._sample_rate
         self._emit_status("finalizing")
-        logger.info("Final refinement — %.1f s total audio in %d segments", total_sec, len(all_segs))
+        logger.info("Final refinement — %.1f s in %d pending segments", total_sec, len(segs))
 
-        # Slice into window-sized chunks and transcribe each
-        chunk_results: list[str] = []
         chunk_samples = int(self._window_sec * self._sample_rate)
-
-        # Group segments into chunks by cumulative sample count
         chunk_segs: list = []
         chunk_size = 0
 
-        for seg in all_segs:
+        for seg in segs:
             chunk_segs.append(seg)
             chunk_size += seg[0].size
             if chunk_size >= chunk_samples:
-                chunk_audio = self._segments_to_audio(chunk_segs)
-                chunk_sec = len(chunk_audio) / self._sample_rate
-                logger.debug("Final chunk: %.1f s", chunk_sec)
-                result = self._engine.transcribe(chunk_audio, sample_rate=self._sample_rate)
-                if result.text:
-                    chunk_results.append(result.text)
+                self._transcribe_chunk_blocking(chunk_segs)
                 chunk_segs = []
                 chunk_size = 0
 
-        # Remaining segments that didn't fill a full chunk
+        # Tail
         if chunk_segs:
-            chunk_audio = self._segments_to_audio(chunk_segs)
-            chunk_sec = len(chunk_audio) / self._sample_rate
-            if chunk_sec >= _MIN_AUDIO_SEC:
-                logger.debug("Final chunk (tail): %.1f s", chunk_sec)
-                result = self._engine.transcribe(chunk_audio, sample_rate=self._sample_rate)
-                if result.text:
-                    chunk_results.append(result.text)
+            tail_sec = chunk_size / self._sample_rate
+            if tail_sec >= _MIN_AUDIO_SEC:
+                self._transcribe_chunk_blocking(chunk_segs)
             else:
-                # Too short for reliable transcription — keep the draft text
-                tail_text = self._segments_to_text(chunk_segs)
+                # Too short for reliable transcription — keep the draft
+                tail_text = self._join_drafts(chunk_segs)
                 if tail_text:
-                    chunk_results.append(tail_text)
+                    self._append_locked(tail_text)
 
-        full_text = " ".join(chunk_results)
-        logger.info("Final refinement done — %d chars across %d chunks",
-                    len(full_text), len(chunk_results))
+        new_locked = self._get_locked()
+
+        with self._lock:
+            self._unrefined_segs = self._unrefined_segs[n:]
+
+        logger.info("Final refinement done — %d chars total", len(new_locked))
         if self.on_refined_text:
-            self.on_refined_text(full_text, True)
+            self.on_refined_text(new_locked, True)
+
+    def _transcribe_chunk_blocking(self, chunk_segs: list) -> None:
+        """Transcribe one chunk (blocking) and append result to locked_text."""
+        audio = self._concat_audio(chunk_segs)
+        audio_sec = len(audio) / self._sample_rate
+        logger.debug("Final chunk: %.1f s", audio_sec)
+        result = self._engine.transcribe(audio, sample_rate=self._sample_rate)
+        if result.text:
+            self._append_locked(result.text)
+
+    # ------------------------------------------------------------------
 
     def _emit_status(self, status: str) -> None:
         if self.on_status:
