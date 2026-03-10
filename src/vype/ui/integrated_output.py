@@ -196,33 +196,38 @@ class IntegratedOutputWindow:
         # Separator
         tk.Frame(self.win, bg=ColorTheme.BORDER, height=1).pack(fill=tk.X)
 
-        footer = tk.Frame(self.win, bg=ColorTheme.BG_SIDEBAR, height=52)
+        # Taller footer (64 px) so buttons are never clipped on HiDPI displays.
+        footer = tk.Frame(self.win, bg=ColorTheme.BG_SIDEBAR, height=64)
         footer.pack(fill=tk.X)
         footer.pack_propagate(False)
 
+        # Centre buttons vertically in the footer using an inner frame
+        btn_row = tk.Frame(footer, bg=ColorTheme.BG_SIDEBAR)
+        btn_row.place(relx=0, rely=0.5, anchor="w", x=14)
+
         btn_copy = tk.Button(
-            footer, text="Copy All",
+            btn_row, text="⎘  Copy All",
             bg=ColorTheme.ACCENT_PRIMARY, fg="#ffffff",
             activebackground="#6d28d9",
             activeforeground="#ffffff",
-            relief=tk.FLAT, padx=18, pady=6,
-            font=("Segoe UI", 10),
+            relief=tk.FLAT, padx=16, pady=7,
+            font=("Segoe UI", 10, "bold"),
             cursor="hand2", bd=0,
             command=self.copy_to_clipboard,
         )
-        btn_copy.pack(side=tk.LEFT, padx=(14, 8), pady=12)
+        btn_copy.pack(side=tk.LEFT, padx=(0, 8))
 
         btn_clear = tk.Button(
-            footer, text="Clear",
-            bg=ColorTheme.BG_CARD_RAISED, fg=ColorTheme.TEXT_PRIMARY,
-            activebackground=ColorTheme.BORDER_LIGHT,
+            btn_row, text="✕  Clear",
+            bg="#1e293b", fg=ColorTheme.TEXT_SECONDARY,
+            activebackground="#334155",
             activeforeground=ColorTheme.TEXT_PRIMARY,
-            relief=tk.FLAT, padx=18, pady=6,
+            relief=tk.FLAT, padx=16, pady=7,
             font=("Segoe UI", 10),
             cursor="hand2", bd=0,
             command=self._on_clear,
         )
-        btn_clear.pack(side=tk.LEFT, pady=12)
+        btn_clear.pack(side=tk.LEFT)
 
     # ------------------------------------------------------------------
     # Visibility
@@ -257,18 +262,27 @@ class IntegratedOutputWindow:
         """Append draft segment text (dimmed colour).  Thread-safe via root.after."""
         if not text or not self._text:
             return
-        self._modify(lambda: (
-            self._text.insert(tk.END, text, _TAG_DRAFT),
-            self._auto_scroll(),
-        ))
+
+        def _do():
+            # Insert a space between segments when the last character isn't
+            # already a space or newline — prevents "word1word2" run-ons.
+            current = self._text.get("1.0", tk.END)
+            if current.rstrip("\n") and not current.rstrip("\n")[-1] in (" ", "\n"):
+                self._text.insert(tk.END, " ", _TAG_DRAFT)
+            self._text.insert(tk.END, text, _TAG_DRAFT)
+            self._auto_scroll()
+
+        self._modify(_do)
 
     def replace_refined(self, full_text: str, final: bool = False) -> None:
         """Replace all displayed text with a refined version.
 
+        ``full_text`` is the complete session transcript:
+          committed (older, draft quality) + refined (recent window, re-transcribed).
         ``final`` is True for the stop-dictation pass — uses bold white text.
         Thread-safe via root.after.
         """
-        if not self._text:
+        if not self._text or not full_text:
             return
         tag = _TAG_FINAL if final else _TAG_REFINED
 
