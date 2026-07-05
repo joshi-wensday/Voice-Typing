@@ -149,17 +149,38 @@ class HistoryRow(QFrame):
         self._anim.setEndValue(target)
         self._anim.start()
 
+    def _expanded_height(self) -> int:
+        """Height needed to show the full text, or _ROW_H if it already fits.
+
+        Expansion is only warranted when the collapsed row actually cuts the
+        text off — measured against the label's real laid-out width.
+        """
+        from PySide6.QtGui import QFontMetrics
+
+        metrics = QFontMetrics(self._label.font())
+        needed = metrics.boundingRect(
+            0, 0, max(self._label.width(), 1), 10_000,
+            Qt.TextFlag.TextWordWrap, self._text,
+        ).height()
+        if needed <= self._label.height() + 2:
+            return _ROW_H  # fully visible already — no expansion
+        chrome = _ROW_H - self._label.height()  # margins + meta line
+        return min(_ROW_H_EXPANDED, needed + chrome)
+
     # ── Events ────────────────────────────────────────────────────────────────
 
     def enterEvent(self, event) -> None:
         if not self._blinking:
             self._set_row_style(hover=True)
-            self._animate_height(_ROW_H_EXPANDED)
+            target = self._expanded_height()
+            if target > _ROW_H:
+                self._animate_height(target)
 
     def leaveEvent(self, event) -> None:
         if not self._blinking:
             self._set_row_style(hover=False)
-            self._animate_height(_ROW_H)
+            if self.height() != _ROW_H:
+                self._animate_height(_ROW_H)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and not self._blinking:

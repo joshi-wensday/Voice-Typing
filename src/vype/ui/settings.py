@@ -202,6 +202,9 @@ class HotkeyCaptureButton(QPushButton):
 def _field_label(text: str) -> QLabel:
     label = QLabel(text)
     label.setObjectName("fieldlabel")
+    # match the input height (text + 8px padding + border) so the label text
+    # sits exactly on the input's midline instead of slightly above it
+    label.setMinimumHeight(35)
     return label
 
 
