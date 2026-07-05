@@ -22,7 +22,17 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = ["PySide6>=6.6"]
-parakeet = ["onnx-asr[gpu]>=0.6"]
+# onnxruntime-gpu 1.23+ are CUDA 13 builds, but NVIDIA ships no cu13 wheels for
+# Windows — pin to the 1.21-1.22 CUDA 12 line and pull the cu12 runtime via pip.
+parakeet = [
+    "onnx-asr>=0.6",
+    "huggingface_hub>=0.23",
+    "onnxruntime-gpu>=1.21,<1.23",
+    "nvidia-cudnn-cu12",
+    "nvidia-cublas-cu12",
+    "nvidia-cuda-runtime-cu12",
+    "nvidia-cufft-cu12",
+]
 whisper = ["faster-whisper>=1.0"]
 dev = [
     "pytest>=8.0",

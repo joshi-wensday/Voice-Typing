@@ -48,7 +48,9 @@ class UiConfig(_Model):
     show_pill: bool = True
     live_preview: bool = True
     preview_interval_s: float = 1.5
-    preview_window_s: float = 30.0
+    # measured on RTX 3080: ~60 ms per second of audio, so 10 s ≈ 0.6 s per tick —
+    # fits the 1.5 s cadence; 30 s would overrun it
+    preview_window_s: float = 10.0
 
 
 class Config(_Model):

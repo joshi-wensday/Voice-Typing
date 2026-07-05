@@ -31,6 +31,14 @@ class ParakeetTranscriber:
         providers = None
         if self._device.lower() == "cuda":
             providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            try:
+                # picks up CUDA/cuDNN DLLs from the nvidia-*-cu13 pip wheels,
+                # so no system-wide CUDA install is needed
+                import onnxruntime
+
+                onnxruntime.preload_dlls()
+            except Exception as exc:
+                logger.warning("CUDA DLL preload failed (%s) — may fall back to CPU", exc)
         logger.info("Loading Parakeet model %s (device=%s)", self._model_id, self._device)
         try:
             self._model = onnx_asr.load_model(self._model_id, providers=providers)
