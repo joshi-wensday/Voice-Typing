@@ -79,8 +79,16 @@ def main() -> int:
         lambda msg: tray.showMessage("Vype", msg, QSystemTrayIcon.MessageIcon.Warning, 3000)
     )
 
-    # warm the model so the first hotkey press is instant
-    threading.Thread(target=transcriber.load, daemon=True, name="vype-preload").start()
+    # warm the model so the first hotkey press is instant; the throwaway
+    # transcribe pays the one-time CUDA kernel-init cost (~5 s) up front
+    def _preload() -> None:
+        import numpy as np
+
+        transcriber.load()
+        transcriber.transcribe(np.zeros(16000, dtype=np.float32))
+        logger.info("Model warm")
+
+    threading.Thread(target=_preload, daemon=True, name="vype-preload").start()
 
     listener = HotkeyListener(
         key=cfg.hotkey.key,
