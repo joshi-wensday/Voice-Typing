@@ -3,7 +3,7 @@
 # Build from the CPU-only build venv:  .venv-build\Scripts\pyinstaller vype.spec
 # The Parakeet model itself is downloaded to the HF cache on first run.
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 a = Analysis(
     ["run_vype.py"],
@@ -12,6 +12,7 @@ a = Analysis(
     datas=[
         ("logo-1280.ico", "."),
         *collect_data_files("onnx_asr"),  # bundled preprocessor .onnx files
+        *copy_metadata("onnx-asr"),  # onnx_asr reads its own version at import
     ],
     hiddenimports=[
         *collect_submodules("onnx_asr"),

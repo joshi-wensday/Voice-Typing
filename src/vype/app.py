@@ -147,11 +147,15 @@ def main() -> int:
     # warm the model so the first hotkey press is instant; the throwaway
     # transcribe pays the one-time CUDA kernel-init cost (~5 s) up front
     def _preload() -> None:
-        import numpy as np
+        try:
+            import numpy as np
 
-        transcriber.load()
-        transcriber.transcribe(np.zeros(16000, dtype=np.float32))
-        logger.info("Model warm")
+            transcriber.load()
+            transcriber.transcribe(np.zeros(16000, dtype=np.float32))
+            logger.info("Model warm")
+        except Exception as exc:
+            logger.error("Model preload failed: %s", exc, exc_info=True)
+            pipeline.on_error(f"Model failed to load: {exc}")
 
     threading.Thread(target=_preload, daemon=True, name="vype-preload").start()
 
