@@ -2,6 +2,10 @@
 # PyInstaller spec for Vype V2 (onedir, windowed).
 # Build from the CPU-only build venv:  .venv-build\Scripts\pyinstaller vype.spec
 # The Parakeet model itself is downloaded to the HF cache on first run.
+#
+# IMPORTANT: the build venv must have onnxruntime==<gpu_setup.ORT_VERSION>
+# (CPU build). The --setup-gpu flow swaps in the GPU DLLs of that exact
+# version; a mismatch breaks the swap.
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 

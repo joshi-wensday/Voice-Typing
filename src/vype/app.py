@@ -45,6 +45,19 @@ def main() -> int:
         handlers=handlers,
     )
 
+    # installer's GPU task: download CUDA runtime, then exit (no tray/hotkey)
+    if "--setup-gpu" in sys.argv:
+        from .ui.gpu_dialog import GpuSetupWindow
+
+        setup_app = QApplication(sys.argv)
+        window = GpuSetupWindow()
+        window.show()
+        return setup_app.exec()
+
+    from .gpu_setup import activate_if_installed
+
+    activate_if_installed()  # must run before onnxruntime is imported
+
     cfg = load_config()
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)

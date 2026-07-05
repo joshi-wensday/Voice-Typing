@@ -25,6 +25,7 @@ DisableProgramGroupPage=yes
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"
 Name: "startupicon"; Description: "Start Vype when Windows starts"; GroupDescription: "Startup:"; Flags: unchecked
+Name: "gpu"; Description: "Enable NVIDIA GPU acceleration (downloads ~1.5 GB from PyPI after install)"; GroupDescription: "Performance:"; Flags: unchecked
 
 [Files]
 Source: "dist\vype\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -35,4 +36,5 @@ Name: "{autodesktop}\Vype"; Filename: "{app}\vype.exe"; Tasks: desktopicon
 Name: "{userstartup}\Vype"; Filename: "{app}\vype.exe"; Tasks: startupicon
 
 [Run]
+Filename: "{app}\vype.exe"; Parameters: "--setup-gpu"; StatusMsg: "Downloading GPU runtime (~1.5 GB)..."; Tasks: gpu; Flags: waituntilterminated
 Filename: "{app}\vype.exe"; Description: "Launch Vype now"; Flags: nowait postinstall skipifsilent
