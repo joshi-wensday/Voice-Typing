@@ -23,12 +23,20 @@ hold hotkey → speak → release → transcribe (local GPU) → [optional LLM c
   the raw transcript if the LLM is unreachable; it never blocks or loses words.
 - **History**: every transcript is appended to `~/.vype/history.jsonl`.
 
-## Install (dev)
+## Install
+
+**Users:** download the installer from the
+[latest release](https://github.com/joshi-wensday/Voice-Typing/releases/latest).
+Tick **"Enable NVIDIA GPU acceleration"** during install to have it download the
+CUDA runtime (~1.5 GB from PyPI) — the installer itself stays small. CPU
+inference is within ~5% of GPU for the default model, so GPU is optional.
+Re-run GPU setup any time with `vype.exe --setup-gpu`.
+
+**Developers:**
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\pip install -e .[ui,parakeet,dev]
-# GPU: onnxruntime-gpu needs CUDA 12.x; see onnx-asr docs if install fails
+.venv\Scripts\pip install -e .[ui,parakeet,dev]   # includes CUDA 12 pip wheels
 vype
 ```
 

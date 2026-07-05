@@ -27,9 +27,13 @@ logger = logging.getLogger(__name__)
 ORT_VERSION = "1.22.0"  # must match the onnxruntime pinned in the build venv
 
 # (pypi project, exact version, wheel-member prefix filter)
+# nvrtc + nvjitlink are load-time dependencies of cublas/cudnn — without them
+# the GPU onnxruntime pybind module fails to import.
 PACKAGES: list[tuple[str, str, str]] = [
     ("onnxruntime-gpu", ORT_VERSION, "onnxruntime/capi/"),
     ("nvidia-cuda-runtime-cu12", "12.9.79", "nvidia/"),
+    ("nvidia-cuda-nvrtc-cu12", "12.9.86", "nvidia/"),
+    ("nvidia-nvjitlink-cu12", "12.9.86", "nvidia/"),
     ("nvidia-cublas-cu12", "12.9.2.10", "nvidia/"),
     ("nvidia-cufft-cu12", "11.4.1.4", "nvidia/"),
     ("nvidia-cudnn-cu12", "9.24.0.43", "nvidia/"),
@@ -37,20 +41,33 @@ PACKAGES: list[tuple[str, str, str]] = [
 
 # core CUDA DLLs must be pinned into the process in dependency order before
 # onnxruntime loads its CUDA provider; the rest resolve from the directory
-_LOAD_ORDER = ("cudart", "nvrtc", "cublaslt", "cublas", "cufft", "cudnn64", "cudnn_")
+_LOAD_ORDER = (
+    "cudart", "nvjitlink", "nvrtc", "cublaslt", "cublas", "cufft", "cudnn64", "cudnn_",
+)
 
 
-def pick_wheel_url(pypi_json: dict, version: str) -> str:
-    """Select the win_amd64 (or pure-python universal) wheel URL for a release."""
+def _py_tag() -> str:
+    return f"cp{sys.version_info.major}{sys.version_info.minor}"
+
+
+def pick_wheel_url(pypi_json: dict, version: str, py_tag: str | None = None) -> str:
+    """Select the wheel for this platform AND this Python.
+
+    ABI-tagged wheels (onnxruntime's cpXY) must match the running interpreter —
+    a cp313 pyd in a cp311 bundle fails to load (links python313.dll).
+    Pure-python wheels (py3-none) match any interpreter.
+    """
+    py_tag = py_tag or _py_tag()
     files = pypi_json.get("releases", {}).get(version) or pypi_json.get("urls", [])
     candidates = [
         f["url"]
         for f in files
         if f.get("filename", "").endswith(".whl")
         and ("win_amd64" in f["filename"] or "py3-none-any" in f["filename"])
+        and (f"{py_tag}-" in f["filename"] or "py3-none" in f["filename"])
     ]
     if not candidates:
-        raise RuntimeError(f"no Windows wheel found for version {version}")
+        raise RuntimeError(f"no Windows {py_tag} wheel found for version {version}")
     # prefer platform-specific over universal
     candidates.sort(key=lambda u: ("win_amd64" not in u))
     return candidates[0]
@@ -160,10 +177,12 @@ def activate_if_installed() -> bool:
             len(_LOAD_ORDER),
         ),
     )
+    loaded = 0
     for dll in dlls:
         try:
             ctypes.WinDLL(str(dll))
+            loaded += 1
         except Exception as exc:
-            logger.debug("preload skipped %s: %s", dll.name, exc)
-    logger.info("GPU mode active (%d CUDA DLLs preloaded)", len(dlls))
+            logger.warning("CUDA DLL preload failed for %s: %s", dll.name, exc)
+    logger.info("GPU mode active (%d/%d CUDA DLLs preloaded)", loaded, len(dlls))
     return True

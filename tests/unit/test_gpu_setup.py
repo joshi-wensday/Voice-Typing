@@ -16,6 +16,28 @@ def test_pick_wheel_prefers_win_amd64():
     assert pick_wheel_url(meta, "1.0") == "http://x/win"
 
 
+def test_pick_wheel_matches_running_python_abi():
+    """cp-tagged wheels must match the interpreter — a cp313 pyd cannot load
+    in a cp311 bundle (it links python313.dll)."""
+    meta = {
+        "urls": [
+            {"filename": "ort-1.22.0-cp310-cp310-win_amd64.whl", "url": "http://x/310"},
+            {"filename": "ort-1.22.0-cp311-cp311-win_amd64.whl", "url": "http://x/311"},
+            {"filename": "ort-1.22.0-cp313-cp313-win_amd64.whl", "url": "http://x/313"},
+        ]
+    }
+    assert pick_wheel_url(meta, "1.22.0", py_tag="cp311") == "http://x/311"
+    assert pick_wheel_url(meta, "1.22.0", py_tag="cp310") == "http://x/310"
+
+
+def test_pick_wheel_abi_mismatch_raises():
+    meta = {
+        "urls": [{"filename": "ort-1.22.0-cp313-cp313-win_amd64.whl", "url": "http://x/313"}]
+    }
+    with pytest.raises(RuntimeError, match="cp311"):
+        pick_wheel_url(meta, "1.22.0", py_tag="cp311")
+
+
 def test_pick_wheel_accepts_universal():
     meta = {"urls": [{"filename": "pkg-1.0-py3-none-any.whl", "url": "http://x/any"}]}
     assert pick_wheel_url(meta, "1.0") == "http://x/any"
@@ -32,7 +54,7 @@ def test_pick_wheel_from_releases_shape():
 
 def test_pick_wheel_no_windows_build_raises():
     meta = {"urls": [{"filename": "pkg-1.0-py3-none-manylinux_x86_64.whl", "url": "http://x"}]}
-    with pytest.raises(RuntimeError, match="no Windows wheel"):
+    with pytest.raises(RuntimeError, match="no Windows"):
         pick_wheel_url(meta, "1.0")
 
 

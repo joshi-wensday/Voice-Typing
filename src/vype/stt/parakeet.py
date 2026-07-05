@@ -48,6 +48,8 @@ class ParakeetTranscriber:
             ] or None
             if "CUDAExecutionProvider" not in available:
                 logger.info("CUDA provider not available — using CPU inference")
+            else:
+                logger.info("CUDA provider available — GPU inference enabled")
         logger.info("Loading Parakeet model %s (device=%s)", self._model_id, self._device)
         try:
             self._model = onnx_asr.load_model(self._model_id, providers=providers)
