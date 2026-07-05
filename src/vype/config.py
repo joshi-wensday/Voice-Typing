@@ -54,8 +54,15 @@ class UiConfig(_Model):
     preview_window_s: float = 10.0
 
 
+class ServerConfig(_Model):
+    host: str = "0.0.0.0"
+    port: int = 5555
+    token: str | None = None  # generated on first `vype serve`
+
+
 class Config(_Model):
     hotkey: HotkeyConfig = Field(default_factory=HotkeyConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
     stt: SttConfig = Field(default_factory=SttConfig)
     cleanup: CleanupConfig = Field(default_factory=CleanupConfig)
     audio: AudioConfig = Field(default_factory=AudioConfig)

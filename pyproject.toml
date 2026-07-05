@@ -34,6 +34,7 @@ parakeet = [
     "nvidia-cufft-cu12",
 ]
 whisper = ["faster-whisper>=1.0"]
+server = ["fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",

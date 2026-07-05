@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#141418" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icon-180.png" />
+    <title>Vype</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main id="surface">
+      <div id="status">hold to talk</div>
+      <div id="orb"></div>
+      <div id="timer"></div>
+      <div id="hint">swipe ↑ lock · swipe ↓ history</div>
+    </main>
+
+    <section id="history" class="hidden">
+      <header>
+        <nav>
+          <button id="tab-recents" class="tab active">Recents</button>
+          <button id="tab-notes" class="tab">Notes</button>
+        </nav>
+        <button id="settings-btn" aria-label="Settings">⚙</button>
+        <button id="close-history" aria-label="Close">✕</button>
+      </header>
+      <div id="list"></div>
+    </section>
+
+    <dialog id="settings">
+      <h2>Settings</h2>
+      <label>Server URL <input id="cfg-url" placeholder="https://pc.tailnet.ts.net" /></label>
+      <label>API token <input id="cfg-token" type="password" /></label>
+      <div class="row">
+        <button id="cfg-test">Test connection</button>
+        <span id="cfg-status"></span>
+      </div>
+      <div class="row right">
+        <button id="cfg-cancel">Cancel</button>
+        <button id="cfg-save" class="primary">Save</button>
+      </div>
+    </dialog>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

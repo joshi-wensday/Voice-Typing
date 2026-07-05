@@ -54,9 +54,30 @@ Cleanup uses any OpenAI-compatible chat endpoint — Ollama locally
 (`http://localhost:11434/v1`, default) or a cloud key. Config lives at
 `~/.vype/config.yaml` (tray → *Open config file*).
 
+## Mobile (Vype Mobile — capture PWA)
+
+A phone companion for capturing thoughts (quick dictation + podcast notes while
+driving). Design: [docs/V2_MOBILE_DESIGN.md](docs/V2_MOBILE_DESIGN.md).
+
+```powershell
+# on the PC: transcription + notes API (prints your API token on first run)
+pip install -e .[server]
+vype serve
+tailscale serve --bg 5555     # HTTPS for the phone (mic requires it)
+
+# build the PWA (served automatically by vype serve from mobile/dist)
+cd mobile && npm install && npm run build
+```
+
+Then on the phone: open `https://<pc>.<tailnet>.ts.net`, add to home screen,
+set server URL + token in ⚙. Hold to talk · swipe ↑ lock · swipe ↓ history ·
+swipe right on a card to copy, left to save as a note. Captures queue offline
+and upload when signal returns.
+
 ## Tests
 
 ```powershell
-pytest              # unit + contract suite, no hardware needed (<1 s)
+pytest              # desktop + server suite, no hardware needed (<1 s)
 pytest -m gpu       # real-model integration tests (downloads weights, needs CUDA)
+cd mobile; npm test # PWA logic suite (vitest)
 ```

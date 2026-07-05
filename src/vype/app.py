@@ -45,6 +45,12 @@ def main() -> int:
         handlers=handlers,
     )
 
+    # headless API server for the mobile PWA / Siri Shortcuts
+    if "serve" in sys.argv[1:2]:
+        from .server import run_serve
+
+        return run_serve()
+
     # installer's GPU task: download CUDA runtime, then exit (no tray/hotkey)
     if "--setup-gpu" in sys.argv:
         from .ui.gpu_dialog import GpuSetupWindow

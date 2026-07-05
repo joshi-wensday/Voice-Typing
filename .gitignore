@@ -92,3 +92,5 @@ Thumbs.db
 REDDIT_POSTS.md
 .venv/
 .venv-build/
+mobile/node_modules/
+mobile/dist/

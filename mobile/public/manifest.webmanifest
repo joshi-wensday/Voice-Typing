@@ -1,0 +1,13 @@
+{
+  "name": "Vype",
+  "short_name": "Vype",
+  "description": "Hold to talk. Capture the thought.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#141418",
+  "theme_color": "#141418",
+  "icons": [
+    { "src": "./icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
