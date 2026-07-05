@@ -1,7 +1,7 @@
 ; Inno Setup script for Vype V2.
 ; Build after PyInstaller:  ISCC vype_installer.iss
 
-#define AppVersion "2.0.0-beta.1"
+#define AppVersion "2.0.0"
 
 [Setup]
 AppId={{8E2F1B7A-9C43-4D6B-A1E0-VYPE00000002}

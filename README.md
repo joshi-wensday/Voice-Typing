@@ -6,6 +6,8 @@ Local-first voice dictation for Windows. Built for dumping thoughts into AI agen
 brainstorming, and journaling — raw speed first, optional AI cleanup when the text
 is for humans.
 
+> **[⬇ Download the latest installer](https://github.com/joshi-wensday/Voice-Typing/releases/latest)** — Windows 10/11
+>
 > V2 is a ground-up rewrite (~1,200 lines vs V1's ~6,300). Design and rationale:
 > [docs/V2_DESIGN.md](docs/V2_DESIGN.md). V1 lives at the `v1.0.0-final` tag.
 
