@@ -46,7 +46,7 @@ def test_hold_release_transcribes_and_pastes_raw(fakes):
     assert fakes["recorder"].start_calls == 1
     assert fakes["recorder"].stop_calls == 1
     assert len(fakes["transcriber"].calls) == 1
-    assert fakes["injector"].pasted == ["hello world"]
+    assert fakes["injector"].pasted == ["hello world "]
     assert fakes["cleaner"].calls == []  # cleanup off by default
     assert fakes["history"].records == [{"raw": "hello world", "cleaned": None}]
     assert p.state == State.IDLE
@@ -55,12 +55,36 @@ def test_hold_release_transcribes_and_pastes_raw(fakes):
     assert p.events[-1] == ("state", "idle")
 
 
+def test_paste_appends_separator_space(fakes):
+    """Back-to-back utterances must not fuse ('works.Okay'); a trailing space
+    separates them. Text already ending in whitespace is left alone."""
+    p = make_pipeline(fakes)
+    hold_cycle(p, t0=0.0)
+    hold_cycle(p, t0=100.0)
+    assert fakes["injector"].pasted == ["hello world ", "hello world "]
+
+
+def test_append_space_disabled(fakes):
+    cfg = Config()
+    cfg.append_space = False
+    p = make_pipeline(fakes, cfg=cfg)
+    hold_cycle(p)
+    assert fakes["injector"].pasted == ["hello world"]
+
+
+def test_no_double_space_when_text_ends_with_whitespace(fakes):
+    fakes["transcriber"].text = "line one\n"
+    p = make_pipeline(fakes)
+    hold_cycle(p)
+    assert fakes["injector"].pasted == ["line one\n"]
+
+
 def test_cleanup_mode_pastes_cleaned_keeps_raw_in_history(fakes):
     p = make_pipeline(fakes)
     p.cleanup_enabled = True
     hold_cycle(p)
     assert fakes["cleaner"].calls == ["hello world"]
-    assert fakes["injector"].pasted == ["Hello, world."]
+    assert fakes["injector"].pasted == ["Hello, world. "]
     assert fakes["history"].records == [{"raw": "hello world", "cleaned": "Hello, world."}]
 
 
@@ -69,7 +93,7 @@ def test_cleanup_failure_falls_back_to_raw(fakes):
     p = make_pipeline(fakes)
     p.cleanup_enabled = True
     hold_cycle(p)
-    assert fakes["injector"].pasted == ["hello world"]
+    assert fakes["injector"].pasted == ["hello world "]
     assert fakes["history"].records == [{"raw": "hello world", "cleaned": None}]
     assert any(kind == "error" for kind, _ in p.events)
     assert p.state == State.IDLE
@@ -114,8 +138,16 @@ def test_tap_starts_handsfree_second_press_stops(fakes):
     assert p.state == State.HANDSFREE_RECORDING
     assert fakes["recorder"].is_recording
     p.press(now=10.0)  # second tap stops
-    assert fakes["injector"].pasted == ["hello world"]
+    assert fakes["injector"].pasted == ["hello world "]
     assert p.state == State.IDLE
+
+
+def test_tap_emits_locked_state_for_ui(fakes):
+    """The pill shows a lock glyph when recording is latched hands-free."""
+    p = make_pipeline(fakes)
+    p.press(now=0.0)
+    p.release(now=0.05)  # tap → hands-free
+    assert p.events[-1] == ("state", "recording-locked")
 
 
 def test_escape_cancels_and_discards(fakes):

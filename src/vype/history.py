@@ -32,6 +32,14 @@ class History:
                     last_line = line
         return json.loads(last_line) if last_line else None
 
+    def recent(self, n: int = 10) -> list[dict]:
+        """Most recent records, newest first (for the pill's history popup)."""
+        if not self._path.exists():
+            return []
+        with self._path.open("r", encoding="utf-8") as f:
+            lines = [line for line in f if line.strip()]
+        return [json.loads(line) for line in reversed(lines[-n:])]
+
     def last_text(self) -> str | None:
         record = self.last()
         if record is None:

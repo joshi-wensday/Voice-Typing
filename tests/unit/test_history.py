@@ -46,6 +46,19 @@ def test_rotation_when_file_exceeds_max_bytes(tmp_path):
     assert path.stat().st_size < 400
 
 
+def test_recent_returns_newest_first(tmp_path):
+    h = History(tmp_path / "history.jsonl")
+    for i in range(5):
+        h.append(raw=f"utterance {i}")
+    recent = h.recent(3)
+    assert [r["raw"] for r in recent] == ["utterance 4", "utterance 3", "utterance 2"]
+
+
+def test_recent_on_empty_history(tmp_path):
+    h = History(tmp_path / "history.jsonl")
+    assert h.recent(5) == []
+
+
 def test_unicode_roundtrip(tmp_path):
     h = History(tmp_path / "history.jsonl")
     h.append(raw="naïve café — ✨")

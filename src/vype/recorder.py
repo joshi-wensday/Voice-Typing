@@ -11,8 +11,10 @@ from typing import Callable, Optional
 
 import numpy as np
 
-# RMS at which the level meter saturates; ~ -10 dBFS, comfortably loud speech.
-_LEVEL_FULL_SCALE_RMS = 0.3
+# RMS at which the level meter saturates. Typical conversational speech at a
+# desktop mic lands around 0.02-0.08 RMS; 0.08 full-scale keeps the waveform
+# visibly alive instead of rendering as flat dots.
+_LEVEL_FULL_SCALE_RMS = 0.08
 
 
 def _sounddevice_stream_factory(samplerate: int, channels: int, device, callback):
@@ -103,6 +105,7 @@ class Recorder:
         with self._lock:
             self._chunks.append(chunk)
         rms = float(np.sqrt(np.mean(chunk**2))) if chunk.size else 0.0
-        target = min(1.0, rms / _LEVEL_FULL_SCALE_RMS)
+        # square-root curve: perceptually livelier response at quiet levels
+        target = min(1.0, (rms / _LEVEL_FULL_SCALE_RMS) ** 0.5)
         # light exponential smoothing so the pill's bars don't flicker
         self._level = 0.6 * target + 0.4 * self._level

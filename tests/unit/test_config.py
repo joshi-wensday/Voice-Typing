@@ -14,7 +14,9 @@ def test_defaults():
     assert cfg.cleanup.enabled is False
     assert cfg.audio.sample_rate == 16000
     assert cfg.ui.live_preview is True
+    assert cfg.ui.preview_at_caret is True
     assert cfg.min_utterance_s == 0.3
+    assert cfg.append_space is True
 
 
 def test_config_dir_env_override(tmp_path, monkeypatch):

@@ -61,16 +61,26 @@ def main() -> int:
     pipeline.on_preview = bridge.preview.emit
     pipeline.on_error = bridge.error.emit
 
-    tray = None
     if cfg.ui.show_pill:
+        from .ui.caption import CaptionBubble
+        from .ui.history_popup import HistoryPopup
         from .ui.pill import Pill
 
+        popup = HistoryPopup(pipeline.history)
         pill = Pill(
             level_provider=lambda: pipeline.recorder.level,
             cleanup_enabled_provider=lambda: pipeline.cleanup_enabled,
+            on_click=lambda: popup.show_above(*pill.anchor_point()),
         )
         bridge.state_changed.connect(pill.set_state)
-        bridge.preview.connect(pill.set_preview)
+
+        if cfg.ui.live_preview:
+            caption = CaptionBubble(
+                at_caret=cfg.ui.preview_at_caret,
+                fallback_anchor=lambda: pill.anchor_point(),
+            )
+            bridge.state_changed.connect(caption.set_state)
+            bridge.preview.connect(caption.set_text)
 
     from .ui.tray import build_tray
 

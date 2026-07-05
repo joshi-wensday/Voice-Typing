@@ -47,6 +47,7 @@ class AudioConfig(_Model):
 class UiConfig(_Model):
     show_pill: bool = True
     live_preview: bool = True
+    preview_at_caret: bool = True  # caption follows the text caret; False → above the pill
     preview_interval_s: float = 1.5
     # measured on RTX 3080: ~60 ms per second of audio, so 10 s ≈ 0.6 s per tick —
     # fits the 1.5 s cadence; 30 s would overrun it
@@ -60,6 +61,8 @@ class Config(_Model):
     audio: AudioConfig = Field(default_factory=AudioConfig)
     ui: UiConfig = Field(default_factory=UiConfig)
     min_utterance_s: float = 0.3
+    # trailing space after each paste so back-to-back utterances don't fuse
+    append_space: bool = True
 
 
 def config_dir() -> Path:

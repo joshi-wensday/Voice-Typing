@@ -81,8 +81,12 @@ class Pipeline:
     def _handle(self, transition, now: float | None) -> None:
         t = time.monotonic() if now is None else now
         with self._fsm_lock:
+            before = self._fsm.state
             command = transition(t)
+            after = self._fsm.state
         self._execute(command)
+        if before is State.HELD_RECORDING and after is State.HANDSFREE_RECORDING:
+            self.on_state("recording-locked")
 
     # ── Command execution ────────────────────────────────────────────────────
 
@@ -127,7 +131,10 @@ class Pipeline:
                     self.on_error("Cleanup offline — pasted raw transcript")
                     text, cleaned = raw, None
 
-            self._injector.paste(text)
+            if self._cfg.append_space and not text.endswith((" ", "\n", "\t")):
+                self._injector.paste(text + " ")
+            else:
+                self._injector.paste(text)
             self._history.append(raw=raw, cleaned=cleaned)
         except Exception as exc:
             logger.error("Pipeline error: %s", exc, exc_info=True)
