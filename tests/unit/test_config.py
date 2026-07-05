@@ -7,7 +7,7 @@ from vype.config import Config, config_dir, load_config, save_config
 
 def test_defaults():
     cfg = Config()
-    assert cfg.hotkey.key == "right ctrl"
+    assert cfg.hotkey.key == "ctrl+alt"
     assert cfg.hotkey.tap_threshold_ms == 300
     assert cfg.stt.backend == "parakeet"
     assert cfg.stt.device == "cuda"

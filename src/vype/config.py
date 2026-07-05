@@ -19,7 +19,7 @@ class _Model(BaseModel):
 
 
 class HotkeyConfig(_Model):
-    key: str = "right ctrl"
+    key: str = "ctrl+alt"  # single key ("f8") or combo ("ctrl+alt")
     tap_threshold_ms: int = 300
 
 
