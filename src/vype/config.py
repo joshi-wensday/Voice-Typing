@@ -63,6 +63,8 @@ class Config(_Model):
     min_utterance_s: float = 0.3
     # trailing space after each paste so back-to-back utterances don't fuse
     append_space: bool = True
+    # privacy-first: wipe the transcript history when the app exits
+    clear_history_on_exit: bool = True
 
 
 def config_dir() -> Path:

@@ -59,6 +59,36 @@ def test_recent_on_empty_history(tmp_path):
     assert h.recent(5) == []
 
 
+def test_delete_removes_matching_record(tmp_path):
+    h = History(tmp_path / "history.jsonl")
+    h.append(raw="keep me")
+    h.append(raw="delete me")
+    h.append(raw="keep me too")
+    target = h.recent(3)[1]  # "delete me"
+    assert h.delete(target["ts"]) is True
+    remaining = [r["raw"] for r in h.recent(10)]
+    assert remaining == ["keep me too", "keep me"]
+
+
+def test_delete_unknown_ts_returns_false(tmp_path):
+    h = History(tmp_path / "history.jsonl")
+    h.append(raw="something")
+    assert h.delete(12345.0) is False
+    assert len(h.recent(10)) == 1
+
+
+def test_clear_removes_all_records_and_rotated_file(tmp_path):
+    path = tmp_path / "history.jsonl"
+    h = History(path, max_bytes=200)
+    for i in range(20):  # forces rotation
+        h.append(raw=f"utterance number {i} padded out to take some space")
+    h.clear()
+    assert not path.exists()
+    assert not (tmp_path / "history.1.jsonl").exists()
+    assert h.recent(10) == []
+    assert h.last() is None
+
+
 def test_unicode_roundtrip(tmp_path):
     h = History(tmp_path / "history.jsonl")
     h.append(raw="naïve café — ✨")

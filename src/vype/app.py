@@ -47,12 +47,15 @@ def main() -> int:
         return 1
 
     transcriber = create_transcriber(cfg.stt)
+    history = History(config_dir() / "history.jsonl")
+    if cfg.clear_history_on_exit:
+        history.clear()  # also wipe leftovers from a session that was force-killed
     pipeline = Pipeline(
         recorder=Recorder(sample_rate=cfg.audio.sample_rate, device_id=cfg.audio.device_id),
         transcriber=transcriber,
         cleaner=Cleaner(cfg.cleanup),
         injector=Injector(),
-        history=History(config_dir() / "history.jsonl"),
+        history=history,
         config=cfg,
     )
 
@@ -150,6 +153,8 @@ def main() -> int:
         return app.exec()
     finally:
         stop_listener()
+        if cfg.clear_history_on_exit:
+            history.clear()  # privacy first: transcripts live only for the session
         guard.detach()
 
 

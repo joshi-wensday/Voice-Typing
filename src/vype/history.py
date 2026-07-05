@@ -40,6 +40,26 @@ class History:
             lines = [line for line in f if line.strip()]
         return [json.loads(line) for line in reversed(lines[-n:])]
 
+    def delete(self, ts: float) -> bool:
+        """Remove the record with the given timestamp. Returns True if found."""
+        if not self._path.exists():
+            return False
+        with self._path.open("r", encoding="utf-8") as f:
+            records = [json.loads(line) for line in f if line.strip()]
+        kept = [r for r in records if r.get("ts") != ts]
+        if len(kept) == len(records):
+            return False
+        with self._path.open("w", encoding="utf-8") as f:
+            for record in kept:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        return True
+
+    def clear(self) -> None:
+        """Privacy-first: wipe all stored transcripts (called at session end)."""
+        self._path.unlink(missing_ok=True)
+        rotated = self._path.with_name(f"{self._path.stem}.1{self._path.suffix}")
+        rotated.unlink(missing_ok=True)
+
     def last_text(self) -> str | None:
         record = self.last()
         if record is None:

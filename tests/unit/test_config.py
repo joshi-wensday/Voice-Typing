@@ -17,6 +17,7 @@ def test_defaults():
     assert cfg.ui.preview_at_caret is True
     assert cfg.min_utterance_s == 0.3
     assert cfg.append_space is True
+    assert cfg.clear_history_on_exit is True
 
 
 def test_config_dir_env_override(tmp_path, monkeypatch):
