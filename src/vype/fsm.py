@@ -37,6 +37,9 @@ class DictationFSM:
     def state(self) -> State:
         return self._state
 
+    def set_tap_threshold(self, tap_threshold_ms: int) -> None:
+        self._threshold = tap_threshold_ms
+
     def on_press(self, t_ms: float) -> Command:
         if self._state is State.IDLE:
             self._state = State.HELD_RECORDING

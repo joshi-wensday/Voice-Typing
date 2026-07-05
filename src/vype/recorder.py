@@ -61,6 +61,10 @@ class Recorder:
     def sample_rate(self) -> int:
         return self._sample_rate
 
+    def set_device(self, device_id: int | None) -> None:
+        """Takes effect on the next start()."""
+        self._device_id = device_id
+
     def start(self) -> None:
         if self._recording:
             return

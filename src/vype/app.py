@@ -61,6 +61,48 @@ def main() -> int:
     pipeline.on_preview = bridge.preview.emit
     pipeline.on_error = bridge.error.emit
 
+    # hotkey listener lives in a mutable slot so settings can rebind it
+    listener_slot: dict = {"listener": None}
+
+    def start_listener() -> None:
+        listener_slot["listener"] = HotkeyListener(
+            key=cfg.hotkey.key,
+            on_press=pipeline.press,
+            on_release=pipeline.release,
+            on_escape=pipeline.escape,
+        )
+        listener_slot["listener"].start()
+
+    def stop_listener() -> None:
+        if listener_slot["listener"] is not None:
+            listener_slot["listener"].stop()
+            listener_slot["listener"] = None
+
+    def _input_devices() -> list[tuple[int, str]]:
+        import sounddevice as sd
+
+        return [
+            (i, d["name"])
+            for i, d in enumerate(sd.query_devices())
+            if d["max_input_channels"] > 0
+        ]
+
+    def open_settings() -> None:
+        from .ui.settings import SettingsDialog
+
+        def apply() -> None:
+            pipeline.apply_settings()
+            pipeline.replace_cleaner(Cleaner(cfg.cleanup))
+            pipeline.recorder.set_device(cfg.audio.device_id)
+            logger.info("Settings saved — hotkey '%s'", cfg.hotkey.key)
+
+        stop_listener()  # so pressing keys in the capture field can't start dictation
+        try:
+            dialog = SettingsDialog(cfg, _input_devices(), on_save=apply)
+            dialog.exec()
+        finally:
+            start_listener()  # rebinds to the (possibly new) key
+
     if cfg.ui.show_pill:
         from .ui.caption import CaptionBubble
         from .ui.history_popup import HistoryPopup
@@ -71,6 +113,7 @@ def main() -> int:
             level_provider=lambda: pipeline.recorder.level,
             cleanup_enabled_provider=lambda: pipeline.cleanup_enabled,
             on_click=lambda: popup.show_above(*pill.anchor_point()),
+            on_right_click=open_settings,
         )
         bridge.state_changed.connect(pill.set_state)
 
@@ -84,7 +127,7 @@ def main() -> int:
 
     from .ui.tray import build_tray
 
-    tray = build_tray(app, pipeline, pipeline.history, config_path())
+    tray = build_tray(app, pipeline, pipeline.history, config_path(), on_settings=open_settings)
     bridge.error.connect(
         lambda msg: tray.showMessage("Vype", msg, QSystemTrayIcon.MessageIcon.Warning, 3000)
     )
@@ -100,19 +143,13 @@ def main() -> int:
 
     threading.Thread(target=_preload, daemon=True, name="vype-preload").start()
 
-    listener = HotkeyListener(
-        key=cfg.hotkey.key,
-        on_press=pipeline.press,
-        on_release=pipeline.release,
-        on_escape=pipeline.escape,
-    )
-    listener.start()
+    start_listener()
 
     logger.info("Vype ready — hold '%s' to dictate", cfg.hotkey.key)
     try:
         return app.exec()
     finally:
-        listener.stop()
+        stop_listener()
         guard.detach()
 
 

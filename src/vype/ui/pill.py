@@ -37,7 +37,13 @@ _TEXT_DIM = QColor(161, 161, 170)
 
 
 class Pill(QWidget):
-    def __init__(self, level_provider, cleanup_enabled_provider=None, on_click=None) -> None:
+    def __init__(
+        self,
+        level_provider,
+        cleanup_enabled_provider=None,
+        on_click=None,
+        on_right_click=None,
+    ) -> None:
         super().__init__(
             None,
             Qt.WindowType.FramelessWindowHint
@@ -51,6 +57,7 @@ class Pill(QWidget):
         self._level_provider = level_provider
         self._cleanup_enabled = cleanup_enabled_provider or (lambda: False)
         self._on_click = on_click
+        self._on_right_click = on_right_click
 
         self._state = "idle"
         self._levels = [0.0] * _BAR_COUNT
@@ -189,3 +196,5 @@ class Pill(QWidget):
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._on_click:
             self._on_click()
+        elif event.button() == Qt.MouseButton.RightButton and self._on_right_click:
+            self._on_right_click()

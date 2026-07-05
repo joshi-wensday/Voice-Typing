@@ -107,6 +107,14 @@ def test_release_after_escape_cancel_is_noop():
     assert fsm.state == State.IDLE
 
 
+def test_tap_threshold_can_be_changed_at_runtime():
+    fsm = make()
+    fsm.set_tap_threshold(500)
+    fsm.on_press(t_ms=0)
+    assert fsm.on_release(t_ms=400) == Command.NONE  # under new threshold → tap
+    assert fsm.state == State.HANDSFREE_RECORDING
+
+
 def test_full_cycle_twice():
     fsm = make()
     for start in (0, 10_000):

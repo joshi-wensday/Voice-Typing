@@ -63,6 +63,14 @@ class Pipeline:
     def recorder(self):
         return self._recorder
 
+    def apply_settings(self) -> None:
+        """Re-read live-tunable values from the (mutated) config object."""
+        self.cleanup_enabled = self._cfg.cleanup.enabled
+        self._fsm.set_tap_threshold(self._cfg.hotkey.tap_threshold_ms)
+
+    def replace_cleaner(self, cleaner) -> None:
+        self._cleaner = cleaner
+
     @property
     def history(self):
         return self._history

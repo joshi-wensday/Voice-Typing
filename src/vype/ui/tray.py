@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 _ICON_PATH = Path(__file__).resolve().parents[3] / "logo-1280.ico"
 
 
-def build_tray(app, pipeline, history, config_file: Path) -> QSystemTrayIcon:
+def build_tray(app, pipeline, history, config_file: Path, on_settings=None) -> QSystemTrayIcon:
     icon = QIcon(str(_ICON_PATH)) if _ICON_PATH.exists() else QIcon()
     tray = QSystemTrayIcon(icon, app)
     tray.setToolTip("Vype — hold your hotkey to dictate")
@@ -39,6 +39,11 @@ def build_tray(app, pipeline, history, config_file: Path) -> QSystemTrayIcon:
     menu.addAction(copy_action)
 
     menu.addSeparator()
+
+    if on_settings is not None:
+        settings_action = QAction("Settings…", menu)
+        settings_action.triggered.connect(on_settings)
+        menu.addAction(settings_action)
 
     config_action = QAction("Open config file", menu)
     config_action.triggered.connect(lambda: os.startfile(config_file))
