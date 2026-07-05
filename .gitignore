@@ -88,4 +88,4 @@ installer_output/
 # OS-specific
 Thumbs.db
 
-REDDIT_POSTS.md
+REDDIT_POSTS.md.venv/
