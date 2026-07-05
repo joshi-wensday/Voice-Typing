@@ -30,6 +30,7 @@ MANIFEST
 # PyInstaller
 *.manifest
 *.spec
+!vype.spec
 
 # Installer logs
 pip-log.txt
@@ -90,3 +91,4 @@ Thumbs.db
 
 REDDIT_POSTS.md
 .venv/
+.venv-build/

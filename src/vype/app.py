@@ -31,9 +31,18 @@ class Bridge(QObject):
 
 
 def main() -> int:
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    try:
+        # the frozen (installer) build has no console — log to a file instead
+        log_path = config_dir() / "vype.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_path, mode="w", encoding="utf-8"))
+    except Exception:
+        pass
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        handlers=handlers,
     )
 
     cfg = load_config()

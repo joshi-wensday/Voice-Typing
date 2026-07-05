@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-_ICON_PATH = Path(__file__).resolve().parents[3] / "logo-1280.ico"
+
+def _icon_path() -> Path:
+    if getattr(sys, "frozen", False):  # PyInstaller: datas land in _MEIPASS
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "logo-1280.ico"
+    return Path(__file__).resolve().parents[3] / "logo-1280.ico"
+
+
+_ICON_PATH = _icon_path()
 
 
 def build_tray(app, pipeline, history, config_file: Path, on_settings=None) -> QSystemTrayIcon:

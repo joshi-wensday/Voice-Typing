@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vype"
-version = "2.0.0a1"
+version = "2.0.0b1"
 description = "Vype V2 - hold a key, talk, release, and your words appear at the cursor"
 readme = "README.md"
 license = { text = "MIT" }
