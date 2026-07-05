@@ -4,100 +4,61 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vype"
-version = "1.0.0"
-description = "Vype - Voice dictation that runs entirely locally on your PC"
+version = "2.0.0a1"
+description = "Vype V2 - hold a key, talk, release, and your words appear at the cursor"
 readme = "README.md"
-license = {text = "MIT"}
-authors = [
-    {name = "Josh", email = "josh@example.com"}
-]
-maintainers = [
-    {name = "Josh", email = "josh@example.com"}
-]
-keywords = ["speech-to-text", "canary", "nemo", "dictation", "accessibility", "voice-control"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: Microsoft :: Windows",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Multimedia :: Sound/Audio :: Speech",
-]
+license = { text = "MIT" }
+authors = [{ name = "Josh" }]
 requires-python = ">=3.10"
 dependencies = [
-    # NVIDIA NeMo — must install torch (CUDA) separately first:
-    #   pip install torch --index-url https://download.pytorch.org/whl/cu124
-    "nemo_toolkit[asr]>=2.0.0",
-    "soundfile>=0.12.1",
+    "numpy>=1.24",
     "sounddevice>=0.4.6",
-    "numpy>=1.24.0",
     "keyboard>=0.13.5",
-    "pywinauto>=0.6.8",
     "pyperclip>=1.8.2",
-    "pystray>=0.19.5",
-    "Pillow>=10.0.0",
-    "pydantic>=2.0.0",
+    "pydantic>=2.0",
     "PyYAML>=6.0",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
+ui = ["PySide6>=6.6"]
+parakeet = ["onnx-asr[gpu]>=0.6"]
+whisper = ["faster-whisper>=1.0"]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "pytest-mock>=3.11.1",
-    "black>=23.7.0",
-    "flake8>=6.1.0",
-    "mypy>=1.5.0",
-    "pre-commit>=3.3.3",
-    "types-PyYAML>=6.0.0",
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+    "mypy>=1.8",
 ]
 
-[project.urls]
-Homepage = "https://github.com/yourusername/vype"
-Documentation = "https://github.com/yourusername/vype/tree/main/docs"
-Repository = "https://github.com/yourusername/vype"
-Issues = "https://github.com/yourusername/vype/issues"
-Changelog = "https://github.com/yourusername/vype/blob/main/CHANGELOG.md"
-
 [project.scripts]
-vype = "vype.__main__:main"
+vype = "vype.app:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.black]
-line-length = 100
-target-version = ["py310", "py311", "py312"]
-include = '\\.pyi?$'
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = "--strict-markers --cov=vype --cov-report=term-missing"
+addopts = "--strict-markers -m 'not gpu and not audio'"
+markers = [
+    "gpu: requires a CUDA GPU and real model weights (run locally: pytest -m gpu)",
+    "audio: requires a microphone / audio device",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
 python_version = "3.10"
-warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true
 
 [tool.coverage.run]
 source = ["src/vype"]
-omit = ["tests/*", "scripts/*"]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-]
+omit = ["src/vype/ui/*", "src/vype/app.py"]
