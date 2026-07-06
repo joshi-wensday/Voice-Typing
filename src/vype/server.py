@@ -111,7 +111,10 @@ def run_serve() -> int:
 
     cfg = load_config()
     if not cfg.server.token:
-        cfg.server.token = secrets.token_urlsafe(24)
+        # short lowercase hex on purpose: the tailnet is the real perimeter
+        # (only your own devices can reach this at all), and the token must
+        # survive being typed on a phone keyboard — no case, no symbols
+        cfg.server.token = secrets.token_hex(4)
         save_config(cfg)
         logger.info("Generated API token (saved to config)")
 

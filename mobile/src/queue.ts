@@ -21,6 +21,15 @@ export type JobRunner = (job: QueueJob) => Promise<void>;
 
 export const MAX_ATTEMPTS = 20;
 
+/** Thrown by runners on 401/403: the token is wrong, not the network.
+ * Retrying won't help until settings change, so attempts are not burned. */
+export class AuthError extends Error {
+  constructor(message = "unauthorized") {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
 export class UploadQueue {
   private flushing = false;
 
@@ -45,9 +54,9 @@ export class UploadQueue {
           await this.run(job);
           await this.storage.remove(job.id);
           done += 1;
-        } catch {
-          await this.storage.bump(job.id);
-          break; // server unreachable — stop hammering, wait for next event
+        } catch (err) {
+          if (!(err instanceof AuthError)) await this.storage.bump(job.id);
+          break; // unreachable or misconfigured — wait for the next event
         }
       }
     } finally {

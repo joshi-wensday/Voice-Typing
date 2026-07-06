@@ -50,4 +50,17 @@ export class VypeApi {
       return false;
     }
   }
+
+  /** True only if the server is reachable AND the token is accepted. */
+  async checkAuth(): Promise<"ok" | "bad-token" | "unreachable"> {
+    try {
+      const response = await this.fetchFn(this.url("/notes?limit=1"), {
+        headers: this.headers(),
+      });
+      if (response.ok) return "ok";
+      return response.status === 401 ? "bad-token" : "unreachable";
+    } catch {
+      return "unreachable";
+    }
+  }
 }

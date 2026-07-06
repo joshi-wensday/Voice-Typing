@@ -3,7 +3,7 @@
 import { VypeApi, type ApiConfig } from "./api";
 import { HoldGesture } from "./gestures";
 import { IdbJobStorage, type StoredJob } from "./idb";
-import { UploadQueue } from "./queue";
+import { AuthError, UploadQueue } from "./queue";
 import { Recorder } from "./recorder";
 import { Store, type Recent } from "./store";
 import { downsample, encodeWav } from "./wav";
@@ -18,23 +18,33 @@ const storage = new IdbJobStorage();
 const recorder = new Recorder();
 const gesture = new HoldGesture();
 
+// the PWA is normally served BY the vype server, so its own origin is the
+// right default — the URL field only matters for separately-hosted builds
 const apiConfig = (): ApiConfig => ({
-  baseUrl: localStorage.getItem("serverUrl") ?? "",
+  baseUrl: localStorage.getItem("serverUrl") || location.origin,
   token: localStorage.getItem("apiToken") ?? "",
 });
 const api = new VypeApi(apiConfig);
 
 const queue = new UploadQueue(storage, async (job) => {
   const stored = job as StoredJob;
-  if (job.kind === "transcribe") {
-    const audio = await storage.audio(job.id);
-    if (!audio) return;
-    const text = await api.transcribe(audio);
-    store.updateRecent(job.id, { text: text || "(silence)", status: "done" });
-    renderList();
-  } else if (stored.text) {
-    await api.addNote(stored.text, stored.tags ?? []);
-    store.markNoteSynced(job.id);
+  try {
+    if (job.kind === "transcribe") {
+      const audio = await storage.audio(job.id);
+      if (!audio) return;
+      const text = await api.transcribe(audio);
+      store.updateRecent(job.id, { text: text || "(silence)", status: "done" });
+      renderList();
+    } else if (stored.text) {
+      await api.addNote(stored.text, stored.tags ?? []);
+      store.markNoteSynced(job.id);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("401")) {
+      status.textContent = "wrong API token — fix it in ⚙";
+      throw new AuthError();
+    }
+    throw err;
   }
 });
 
@@ -233,11 +243,13 @@ $("cfg-save").addEventListener("click", () => {
 });
 $("cfg-test").addEventListener("click", async () => {
   const probe = new VypeApi(() => ({
-    baseUrl: ($("cfg-url") as HTMLInputElement).value.trim(),
+    baseUrl: ($("cfg-url") as HTMLInputElement).value.trim() || location.origin,
     token: ($("cfg-token") as HTMLInputElement).value.trim(),
   }));
   $("cfg-status").textContent = "testing…";
-  $("cfg-status").textContent = (await probe.health()) ? "✓ connected" : "✗ unreachable";
+  const result = await probe.checkAuth(); // validates the TOKEN, not just reachability
+  $("cfg-status").textContent =
+    result === "ok" ? "✓ connected" : result === "bad-token" ? "✗ wrong token" : "✗ unreachable";
 });
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
@@ -245,7 +257,14 @@ $("cfg-test").addEventListener("click", async () => {
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
-if (!apiConfig().baseUrl) {
-  status.textContent = "set your server in ⚙ (swipe ↓)";
+// one-tap setup: /#token=XXXX stores the token and cleans the URL
+const hashToken = new URLSearchParams(location.hash.slice(1)).get("token");
+if (hashToken) {
+  localStorage.setItem("apiToken", hashToken);
+  history.classList.add("hidden");
+  window.history.replaceState(null, "", location.pathname);
+}
+if (!apiConfig().token) {
+  status.textContent = "set your API token in ⚙ (swipe ↓)";
 }
 flush();

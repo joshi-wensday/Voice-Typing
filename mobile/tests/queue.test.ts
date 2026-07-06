@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { MAX_ATTEMPTS, UploadQueue, type JobStorage, type QueueJob } from "../src/queue";
+import {
+  AuthError,
+  MAX_ATTEMPTS,
+  UploadQueue,
+  type JobStorage,
+  type QueueJob,
+} from "../src/queue";
 
 function memStorage(jobs: QueueJob[]): JobStorage & { jobs: QueueJob[] } {
   const state = { jobs: [...jobs] };
@@ -61,6 +67,16 @@ describe("UploadQueue", () => {
     await q.flush();
     expect(ran).toEqual(["ok"]);
     expect(storage.jobs).toEqual([]);
+  });
+
+  it("auth errors do not burn attempts (bad token is not a transient failure)", async () => {
+    const storage = memStorage([job("a", 100)]);
+    const q = new UploadQueue(storage, async () => {
+      throw new AuthError();
+    });
+    for (let i = 0; i < MAX_ATTEMPTS + 5; i++) await q.flush();
+    expect(storage.jobs).toHaveLength(1); // still queued, never poison-dropped
+    expect(storage.jobs[0].attempts).toBe(0);
   });
 
   it("succeeds on retry after connectivity returns", async () => {
