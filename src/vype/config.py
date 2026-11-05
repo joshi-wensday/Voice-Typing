@@ -29,6 +29,9 @@ class SttConfig(_Model):
     model: str | None = None  # backend-specific model override
     base_url: str | None = None  # openai backend only
     api_key: str | None = None
+    # longer recordings are split at pauses into pieces at most this long, so
+    # no engine input limit can ever swallow a recording
+    max_chunk_s: float = 20.0
 
 
 class CleanupConfig(_Model):

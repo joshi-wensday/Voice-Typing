@@ -17,6 +17,7 @@ from .hotkey import HotkeyListener
 from .inject import Injector
 from .pipeline import Pipeline
 from .recorder import Recorder
+from .spool import AudioSpool
 from .stt import create_transcriber
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ class Bridge(QObject):
     state_changed = Signal(str)
     preview = Signal(str)
     error = Signal(str)
+    notice = Signal(str)
 
 
 def main() -> int:
@@ -85,12 +87,15 @@ def main() -> int:
         injector=Injector(),
         history=history,
         config=cfg,
+        # audio stays on disk until its transcript is safely pasted + saved
+        spool=AudioSpool(config_dir() / "pending"),
     )
 
     bridge = Bridge()
     pipeline.on_state = bridge.state_changed.emit
     pipeline.on_preview = bridge.preview.emit
     pipeline.on_error = bridge.error.emit
+    pipeline.on_notice = bridge.notice.emit
 
     # hotkey listener lives in a mutable slot so settings can rebind it
     listener_slot: dict = {"listener": None}
@@ -158,9 +163,27 @@ def main() -> int:
 
     from .ui.tray import build_tray
 
-    tray = build_tray(app, pipeline, pipeline.history, config_path(), on_settings=open_settings)
+    def retry_unfinished() -> None:
+        threading.Thread(
+            target=pipeline.recover_pending,
+            kwargs={"announce_empty": True},
+            daemon=True,
+            name="vype-recover",
+        ).start()
+
+    tray = build_tray(
+        app,
+        pipeline,
+        pipeline.history,
+        config_path(),
+        on_settings=open_settings,
+        on_retry=retry_unfinished,
+    )
     bridge.error.connect(
-        lambda msg: tray.showMessage("Vype", msg, QSystemTrayIcon.MessageIcon.Warning, 3000)
+        lambda msg: tray.showMessage("Vype", msg, QSystemTrayIcon.MessageIcon.Warning, 6000)
+    )
+    bridge.notice.connect(
+        lambda msg: tray.showMessage("Vype", msg, QSystemTrayIcon.MessageIcon.Information, 5000)
     )
 
     # warm the model so the first hotkey press is instant; the throwaway
@@ -175,6 +198,9 @@ def main() -> int:
         except Exception as exc:
             logger.error("Model preload failed: %s", exc, exc_info=True)
             pipeline.on_error(f"Model failed to load: {exc}")
+            return
+        # recordings a previous session never finished (crash, failed pass)
+        pipeline.recover_pending()
 
     threading.Thread(target=_preload, daemon=True, name="vype-preload").start()
 

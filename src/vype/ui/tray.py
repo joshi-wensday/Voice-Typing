@@ -19,7 +19,9 @@ def _icon_path() -> Path:
 _ICON_PATH = _icon_path()
 
 
-def build_tray(app, pipeline, history, config_file: Path, on_settings=None) -> QSystemTrayIcon:
+def build_tray(
+    app, pipeline, history, config_file: Path, on_settings=None, on_retry=None
+) -> QSystemTrayIcon:
     icon = QIcon(str(_ICON_PATH)) if _ICON_PATH.exists() else QIcon()
     tray = QSystemTrayIcon(icon, app)
     tray.setToolTip("Vype — hold your hotkey to dictate")
@@ -45,6 +47,11 @@ def build_tray(app, pipeline, history, config_file: Path, on_settings=None) -> Q
 
     copy_action.triggered.connect(copy_last)
     menu.addAction(copy_action)
+
+    if on_retry is not None:
+        retry_action = QAction("Retry unfinished recordings", menu)
+        retry_action.triggered.connect(on_retry)
+        menu.addAction(retry_action)
 
     menu.addSeparator()
 

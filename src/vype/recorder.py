@@ -47,6 +47,8 @@ class Recorder:
         self._lock = threading.Lock()
         self._level = 0.0
         self._recording = False
+        # optional per-chunk observer (the on-disk audio spool); must be cheap
+        self.tap: Optional[Callable[[np.ndarray], None]] = None
 
     @property
     def is_recording(self) -> bool:
@@ -108,6 +110,12 @@ class Recorder:
     def _on_audio(self, chunk: np.ndarray) -> None:
         with self._lock:
             self._chunks.append(chunk)
+        tap = self.tap
+        if tap is not None:
+            try:
+                tap(chunk)
+            except Exception:
+                pass  # the safety net must never break capture itself
         rms = float(np.sqrt(np.mean(chunk**2))) if chunk.size else 0.0
         # square-root curve: perceptually livelier response at quiet levels
         target = min(1.0, (rms / _LEVEL_FULL_SCALE_RMS) ** 0.5)

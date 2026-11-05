@@ -29,6 +29,7 @@ def make_pipeline(fakes, cfg=None, **kwargs):
     p.on_state = lambda s: p.events.append(("state", s))
     p.on_preview = lambda t: p.events.append(("preview", t))
     p.on_error = lambda m: p.events.append(("error", m))
+    p.on_notice = lambda m: p.events.append(("notice", m))
     return p
 
 
@@ -216,3 +217,110 @@ def test_preview_skips_tiny_snapshots(fakes):
     p.press(now=0.0)
     p.preview_tick()
     assert fakes["transcriber"].calls == []
+
+
+# ── Never lose a recording ───────────────────────────────────────────────────
+
+class TapRecorder:
+    """Like the real Recorder: every captured chunk also goes to .tap (the spool)."""
+
+    def __init__(self, audio):
+        from conftest import FakeRecorder
+
+        self._inner = FakeRecorder(audio)
+        self.tap = None
+        self.level = 0.0
+
+    @property
+    def stop_calls(self):
+        return self._inner.stop_calls
+
+    def start(self):
+        self._inner.start()
+
+    def stop(self):
+        audio = self._inner.stop()
+        if self.tap is not None:
+            self.tap(audio)
+        return audio
+
+    def snapshot(self, last_s=None):
+        return self._inner.snapshot(last_s)
+
+
+def spooled_pipeline(fakes, tmp_path, audio=None):
+    from vype.spool import AudioSpool
+
+    audio = audio if audio is not None else np.full(SR, 0.1, dtype=np.float32)
+    fakes["recorder"] = TapRecorder(audio)
+    spool = AudioSpool(tmp_path)
+    return make_pipeline(fakes, spool=spool), spool
+
+
+def test_long_recording_is_split_and_pasted_once(fakes):
+    fakes["recorder"].audio = np.zeros(int(45 * SR), dtype=np.float32)
+    p = make_pipeline(fakes)
+    hold_cycle(p)
+    assert len(fakes["transcriber"].calls) == 3  # 45 s at a 20 s ceiling
+    assert all(len(a) <= 20 * SR for a in fakes["transcriber"].calls)
+    assert fakes["injector"].pasted == ["hello world hello world hello world "]
+    assert len(fakes["history"].records) == 1
+
+
+def test_successful_recording_leaves_nothing_on_disk(fakes, tmp_path):
+    p, spool = spooled_pipeline(fakes, tmp_path)
+    hold_cycle(p)
+    assert fakes["injector"].pasted == ["hello world "]
+    assert spool.pending() == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_transcription_keeps_audio_then_recovers(fakes, tmp_path):
+    def boom(audio):
+        raise RuntimeError("input too long")
+
+    original = fakes["transcriber"].transcribe
+    fakes["transcriber"].transcribe = boom
+    p, spool = spooled_pipeline(fakes, tmp_path)
+    hold_cycle(p)
+
+    assert fakes["injector"].pasted == []
+    assert len(spool.pending()) == 1
+    errors = [m for kind, m in p.events if kind == "error"]
+    assert errors and "audio is saved" in errors[-1]
+    assert p.state == State.IDLE
+
+    # engine works again → retry puts it in history (never pastes) and cleans up
+    fakes["transcriber"].transcribe = original
+    p.recover_pending()
+    assert fakes["history"].records == [{"raw": "hello world", "cleaned": None}]
+    assert fakes["injector"].pasted == []
+    assert spool.pending() == []
+    assert any(kind == "notice" and "Recovered 1" in m for kind, m in p.events)
+
+
+def test_recovery_failure_keeps_audio(fakes, tmp_path):
+    def boom(audio):
+        raise RuntimeError("still broken")
+
+    fakes["transcriber"].transcribe = boom
+    p, spool = spooled_pipeline(fakes, tmp_path)
+    hold_cycle(p)
+    p.recover_pending()
+    assert len(spool.pending()) == 1
+    assert fakes["history"].records == []
+
+
+def test_escape_discards_spooled_audio(fakes, tmp_path):
+    p, spool = spooled_pipeline(fakes, tmp_path)
+    p.press(now=0.0)
+    p.escape()
+    assert spool.pending() == []
+
+
+def test_recover_with_nothing_pending_can_announce(fakes, tmp_path):
+    p, _ = spooled_pipeline(fakes, tmp_path)
+    p.recover_pending()
+    assert not any(kind == "notice" for kind, _ in p.events)
+    p.recover_pending(announce_empty=True)
+    assert ("notice", "No unfinished recordings.") in p.events

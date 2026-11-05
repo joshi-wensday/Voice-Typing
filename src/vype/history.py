@@ -11,6 +11,9 @@ class History:
     def __init__(self, path: Path, max_bytes: int = 10_000_000) -> None:
         self._path = Path(path)
         self._max_bytes = max_bytes
+        # ts doubles as the record id (delete-by-ts); Windows' clock can return
+        # the same time.time() for back-to-back appends, so force it unique
+        self._last_ts = 0.0
 
     def append(self, raw: str, cleaned: str | None = None) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -18,7 +21,9 @@ class History:
             rotated = self._path.with_name(f"{self._path.stem}.1{self._path.suffix}")
             rotated.unlink(missing_ok=True)
             self._path.rename(rotated)
-        record = {"ts": time.time(), "raw": raw, "cleaned": cleaned}
+        ts = max(time.time(), self._last_ts + 1e-6)
+        self._last_ts = ts
+        record = {"ts": ts, "raw": raw, "cleaned": cleaned}
         with self._path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 

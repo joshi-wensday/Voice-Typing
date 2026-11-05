@@ -50,7 +50,9 @@ def _decode_wav(data: bytes) -> np.ndarray:
     return audio
 
 
-def create_app(transcriber, notes, token: str):
+def create_app(transcriber, notes, token: str, max_chunk_s: float = 20.0):
+    from .chunking import transcribe_long
+
     from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
@@ -83,8 +85,9 @@ def create_app(transcriber, notes, token: str):
             audio = _decode_wav(data)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        text = transcriber.transcribe(audio)
-        return {"text": text}
+        # long phone memos are split at pauses — no engine input limit applies
+        result = transcribe_long(transcriber, audio, 16000, max_chunk_s)
+        return {"text": result.text}
 
     @app.post("/notes", dependencies=[Depends(require_token)])
     def add_note(note: NoteIn):
@@ -123,7 +126,12 @@ def run_serve() -> int:
     transcriber.load()
 
     notes = NotesStore(config_dir() / "notes.jsonl")
-    app = create_app(transcriber=transcriber, notes=notes, token=cfg.server.token)
+    app = create_app(
+        transcriber=transcriber,
+        notes=notes,
+        token=cfg.server.token,
+        max_chunk_s=cfg.stt.max_chunk_s,
+    )
 
     # serve the PWA when a build exists next to the repo (dev) or the exe
     pwa_dist = Path(__file__).resolve().parents[2] / "mobile" / "dist"
