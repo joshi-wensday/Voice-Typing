@@ -30,6 +30,11 @@ Name: "gpu"; Description: "Enable NVIDIA GPU acceleration (downloads ~1.5 GB fro
 [Files]
 Source: "dist\vype\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; the GPU runtime is downloaded after install, so the uninstaller doesn't know
+; its files — remove it explicitly (otherwise ~1.5 GB is left behind)
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\_internal\nvidia_dlls"
+
 [Icons]
 Name: "{autoprograms}\Vype"; Filename: "{app}\vype.exe"
 Name: "{autodesktop}\Vype"; Filename: "{app}\vype.exe"; Tasks: desktopicon

@@ -28,7 +28,8 @@ parakeet = [
     "onnx-asr>=0.6",
     "huggingface_hub>=0.23",
     "onnxruntime-gpu>=1.21,<1.23",
-    "nvidia-cudnn-cu12",
+    # pinned: ORT 1.22 can't drive newer cuDNN (silent CPU fallback) — see gpu_setup.py
+    "nvidia-cudnn-cu12==9.10.2.21",
     "nvidia-cublas-cu12",
     "nvidia-cuda-runtime-cu12",
     "nvidia-cufft-cu12",

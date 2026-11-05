@@ -195,6 +195,16 @@ def main() -> int:
             transcriber.load()
             transcriber.transcribe(np.zeros(16000, dtype=np.float32))
             logger.info("Model warm")
+            # a broken CUDA/cuDNN combo only shows up on that first run, and
+            # onnxruntime hides it by moving to CPU — surface it instead
+            on_gpu = getattr(transcriber, "on_gpu", lambda: None)()
+            if on_gpu is False:
+                pipeline.on_error(
+                    "GPU acceleration failed — Vype is running on the CPU (slower). "
+                    "Details in ~/.vype/vype.log."
+                )
+            elif on_gpu:
+                logger.info("Inference confirmed on GPU")
         except Exception as exc:
             logger.error("Model preload failed: %s", exc, exc_info=True)
             pipeline.on_error(f"Model failed to load: {exc}")

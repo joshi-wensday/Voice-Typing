@@ -87,3 +87,22 @@ def test_onnxruntime_gpu_pin_matches_bundled_cpu_version():
     """The GPU swap only works when versions are identical — guard the pin."""
     gpu_pin = next(v for name, v, _ in PACKAGES if name == "onnxruntime-gpu")
     assert gpu_pin == ORT_VERSION
+
+
+def test_marker_must_match_current_pins(tmp_path, monkeypatch):
+    """A GPU runtime downloaded from an older pin set (e.g. the cuDNN 9.24 that
+    silently fell back to CPU) must not be activated."""
+    import vype.gpu_setup as gs
+
+    marker = tmp_path / ".installed"
+    monkeypatch.setattr(gs, "_marker", lambda: marker)
+    assert gs.is_installed() is False
+    marker.write_text("ort==1.22.0\n", encoding="utf-8")  # pre-fingerprint format
+    assert gs.is_installed() is False
+    marker.write_text(gs.fingerprint(), encoding="utf-8")
+    assert gs.is_installed() is True
+
+
+def test_cudnn_pin_is_not_the_known_broken_build():
+    cudnn = dict((n, v) for n, v, _ in PACKAGES)["nvidia-cudnn-cu12"]
+    assert cudnn != "9.24.0.43"

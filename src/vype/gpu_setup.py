@@ -36,7 +36,12 @@ PACKAGES: list[tuple[str, str, str]] = [
     ("nvidia-nvjitlink-cu12", "12.9.86", "nvidia/"),
     ("nvidia-cublas-cu12", "12.9.2.10", "nvidia/"),
     ("nvidia-cufft-cu12", "11.4.1.4", "nvidia/"),
-    ("nvidia-cudnn-cu12", "9.24.0.43", "nvidia/"),
+    # cuDNN is pinned to what ORT 1.22's cudnn-frontend can drive. 9.24 makes
+    # the encoder's first Conv fail ("Failed to initialize CUDNN Frontend"), and
+    # onnxruntime then silently re-creates the session on CPU — ~11x slower.
+    # 9.8 and 9.10 verified on an RTX 3080; don't bump without re-running
+    # the GPU check (Parakeet.on_gpu() after warm-up).
+    ("nvidia-cudnn-cu12", "9.10.2.21", "nvidia/"),
 ]
 
 # core CUDA DLLs must be pinned into the process in dependency order before
@@ -101,9 +106,25 @@ def _marker() -> Path:
     return _nvidia_dir() / ".installed"
 
 
+def fingerprint() -> str:
+    """What the marker records: every pinned package version. A runtime
+    installed from a different (e.g. known-broken) pin set is ignored."""
+    return "".join(f"{name}=={version}\n" for name, version, _ in PACKAGES)
+
+
 def is_installed() -> bool:
     try:
-        return _marker().exists()
+        marker = _marker()
+        if not marker.exists():
+            return False
+        if marker.read_text(encoding="utf-8") != fingerprint():
+            logger.warning(
+                "GPU runtime in %s is from an older Vype — re-run GPU setup "
+                "(reinstall with the GPU option ticked). Using CPU.",
+                marker.parent,
+            )
+            return False
+        return True
     except Exception:
         return False
 
@@ -151,7 +172,7 @@ def install(progress: Callable[[str, float], None]) -> None:
                             shutil.copyfileobj(src, out)
                 wheel_path.unlink(missing_ok=True)
 
-    _marker().write_text(f"ort=={ORT_VERSION}\n", encoding="utf-8")
+    _marker().write_text(fingerprint(), encoding="utf-8")
     progress("GPU support installed", 1.0)
     logger.info("GPU support installed to %s", nvidia_dest)
 
