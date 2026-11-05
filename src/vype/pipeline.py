@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Callable, Optional
 
-from .chunking import transcribe_long
+from .chunking import IncrementalTranscript, transcribe_long
 from .cleanup import CleanupUnavailable
 from .config import Config
 from .fsm import Command, DictationFSM, State
@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 # Snapshots shorter than this aren't worth a preview pass.
 _MIN_PREVIEW_S = 0.5
+# how often the background loop checks for a finished long-recording piece
+_INCREMENTAL_POLL_S = 1.0
 
 
 class Pipeline:
@@ -50,6 +52,10 @@ class Pipeline:
         self._spool = spool
         self._spool_rec = None  # the in-flight SpoolRecording, if any
         self._recover_lock = threading.Lock()
+        # background transcription of the live recording (long dictations)
+        self._inc: Optional[IncrementalTranscript] = None
+        self._inc_stop: Optional[threading.Event] = None
+        self._inc_thread: Optional[threading.Thread] = None
 
         self._fsm = DictationFSM(tap_threshold_ms=config.hotkey.tap_threshold_ms)
         self._fsm_lock = threading.Lock()
@@ -112,38 +118,57 @@ class Pipeline:
     def _execute(self, command: Command) -> None:
         if command is Command.START_RECORDING:
             self._open_spool()
+            self._inc = IncrementalTranscript(
+                self._locked_transcribe, self._recorder_sample_rate(), self._cfg.stt.max_chunk_s
+            )
             self._recorder.start()
             self.on_state("recording")
             self._start_preview_loop()
+            self._start_incremental_loop()
         elif command is Command.STOP_AND_PROCESS:
             self._stop_preview_loop()
+            inc, inc_thread = self._stop_incremental_loop()
             audio = self._recorder.stop()
             rec = self._close_spool()
             self.on_state("processing")
+            # never join the background thread here: this is the keyboard-hook
+            # thread, and blocking it stalls system-wide input
             if self._run_async:
                 threading.Thread(
-                    target=self._process, args=(audio, rec), daemon=True, name="vype-process"
+                    target=self._process,
+                    args=(audio, rec, inc, inc_thread),
+                    daemon=True,
+                    name="vype-process",
                 ).start()
             else:
-                self._process(audio, rec)
+                self._process(audio, rec, inc, inc_thread)
         elif command is Command.CANCEL:
             self._stop_preview_loop()
+            self._stop_incremental_loop()
             self._recorder.stop()
             rec = self._close_spool()
             if rec is not None:
                 self._spool.discard(rec.path)  # cancelled on purpose
             self.on_state("idle")
 
-    def _process(self, audio, rec=None) -> None:
+    def _process(self, audio, rec=None, inc=None, inc_thread=None) -> None:
         keep_audio = False
         try:
+            if inc_thread is not None:
+                inc_thread.join()  # let an in-flight background piece land
             duration_s = len(audio) / self._recorder_sample_rate()
             if duration_s < self._cfg.min_utterance_s:
                 logger.debug("Discarding %.2f s utterance (below minimum)", duration_s)
                 return
 
-            with self._engine_lock:
-                result = self._transcribe(audio)
+            if inc is None:
+                inc = IncrementalTranscript(
+                    self._locked_transcribe,
+                    self._recorder_sample_rate(),
+                    self._cfg.stt.max_chunk_s,
+                )
+            # pieces finished during recording are already done — only the tail remains
+            result = inc.finish(audio)
             raw = result.text
             if not raw:
                 return
@@ -174,8 +199,60 @@ class Pipeline:
                 self._fsm.on_processing_done()
             self.on_state("idle")
 
+    def _locked_transcribe(self, audio) -> str:
+        with self._engine_lock:
+            return self._transcriber.transcribe(audio)
+
+    # ── Background transcription of long recordings ──────────────────────────
+
+    def incremental_tick(self) -> int:
+        """Transcribe any pieces of the live recording that are already final.
+
+        Returns how many were committed. Cheap when there's nothing to do: the
+        sample counter is checked before the buffer is ever copied.
+        """
+        inc = self._inc
+        if inc is None:
+            return 0
+        if self._fsm.state not in (State.HELD_RECORDING, State.HANDSFREE_RECORDING):
+            return 0
+        samples = getattr(self._recorder, "samples", None)
+        if samples is not None and not inc.ready(samples):
+            return 0
+        audio = self._recorder.snapshot()
+        done = 0
+        while inc.advance(audio):  # catch up if more than one window is waiting
+            done += 1
+        return done
+
+    def _start_incremental_loop(self) -> None:
+        if not self._run_async:
+            return  # tests drive incremental_tick() directly
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=self._incremental_loop, args=(stop,), daemon=True, name="vype-incremental"
+        )
+        self._inc_stop, self._inc_thread = stop, thread
+        thread.start()
+
+    def _stop_incremental_loop(self):
+        """Signal the loop to exit; returns (transcript, thread) for _process."""
+        if self._inc_stop is not None:
+            self._inc_stop.set()
+        inc, thread = self._inc, self._inc_thread
+        self._inc = self._inc_thread = self._inc_stop = None
+        return inc, thread
+
+    def _incremental_loop(self, stop: threading.Event) -> None:
+        # per-recording Event: a quick cancel → restart can't revive this loop
+        while not stop.wait(timeout=_INCREMENTAL_POLL_S):
+            try:
+                self.incremental_tick()
+            except Exception as exc:
+                logger.warning("Background transcription tick failed: %s", exc)
+
     def _transcribe(self, audio):
-        """Caller holds the engine lock."""
+        """Whole-recording pass for recovery. Caller holds the engine lock."""
         return transcribe_long(
             self._transcriber, audio, self._recorder_sample_rate(), self._cfg.stt.max_chunk_s
         )

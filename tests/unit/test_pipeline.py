@@ -324,3 +324,20 @@ def test_recover_with_nothing_pending_can_announce(fakes, tmp_path):
     assert not any(kind == "notice" for kind, _ in p.events)
     p.recover_pending(announce_empty=True)
     assert ("notice", "No unfinished recordings.") in p.events
+
+
+def test_background_pieces_mean_only_the_tail_is_left_at_stop(fakes):
+    fakes["recorder"].audio = np.zeros(int(65 * SR), dtype=np.float32)
+    p = make_pipeline(fakes)
+    p.press(now=0.0)
+    assert p.incremental_tick() == 3  # 65 s: three 20 s pieces already final
+    assert len(fakes["transcriber"].calls) == 3
+    p.release(now=1.0)
+    assert len(fakes["transcriber"].calls) == 4  # just the 5 s tail at stop
+    assert fakes["injector"].pasted == [" ".join(["hello world"] * 4) + " "]
+
+
+def test_incremental_tick_idle_is_noop(fakes):
+    p = make_pipeline(fakes)
+    assert p.incremental_tick() == 0
+    assert fakes["transcriber"].calls == []

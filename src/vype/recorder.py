@@ -44,6 +44,7 @@ class Recorder:
         self._stream_factory = stream_factory
         self._stream = None
         self._chunks: list[np.ndarray] = []
+        self._samples = 0
         self._lock = threading.Lock()
         self._level = 0.0
         self._recording = False
@@ -60,6 +61,11 @@ class Recorder:
         return self._level
 
     @property
+    def samples(self) -> int:
+        """Samples captured so far this recording (cheap — no copy)."""
+        return self._samples
+
+    @property
     def sample_rate(self) -> int:
         return self._sample_rate
 
@@ -72,6 +78,7 @@ class Recorder:
             return
         with self._lock:
             self._chunks = []
+            self._samples = 0
         self._level = 0.0
         self._stream = self._stream_factory(
             self._sample_rate, 1, self._device_id, self._on_audio
@@ -110,6 +117,7 @@ class Recorder:
     def _on_audio(self, chunk: np.ndarray) -> None:
         with self._lock:
             self._chunks.append(chunk)
+            self._samples += len(chunk)
         tap = self.tap
         if tap is not None:
             try:

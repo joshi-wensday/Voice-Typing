@@ -27,6 +27,10 @@ class FakeRecorder:
         self.stop_calls += 1
         return self.audio
 
+    @property
+    def samples(self):
+        return len(self.audio)
+
     def snapshot(self, last_s=None):
         if last_s is None:
             return self.audio
