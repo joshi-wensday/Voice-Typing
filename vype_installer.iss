@@ -34,6 +34,8 @@ Source: "dist\vype\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cre
 ; its files — remove it explicitly (otherwise ~1.5 GB is left behind)
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\_internal\nvidia_dlls"
+Type: files; Name: "{app}\_internal\onnxruntime\capi\onnxruntime_providers_cuda.dll"
+Type: files; Name: "{app}\_internal\onnxruntime\capi\onnxruntime_providers_tensorrt.dll"
 
 [Icons]
 Name: "{autoprograms}\Vype"; Filename: "{app}\vype.exe"
